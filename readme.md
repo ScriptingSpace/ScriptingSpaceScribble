@@ -23,6 +23,38 @@ install until that has run once.
 One-time repo setting: **Settings → Pages → Build and deployment → Source:
 "GitHub Actions"**.
 
+## npm Publishing
+
+The package is publishable to npm as `@scripting-space/scribble`:
+
+```bash
+yarn build:lib      # compile src/index.ts (the public barrel) → lib/ (JS + .d.ts)
+yarn publish        # prepublishOnly runs: vitest → tsc --noEmit → build:lib
+```
+
+- **Public API = `src/index.ts`.** Everything consumers can import comes from
+  that barrel (`lib/index.js` + `lib/index.d.ts` are built from it via
+  `tsconfig.build.json`, with app-only `src/main.tsx` and tests excluded).
+- `package.json` points `main` / `types` / `exports` at `lib/`, and `files`
+  ships only `lib/` — app scaffolding (index.html, main.tsx, configs) never
+  reaches npm.
+- `sideEffects: false` + `exports` make the barrel tree-shakeable.
+- `react` / `react-dom` are `peerDependencies` — the library compiles against
+  the consumer's React copy.
+
+### Consuming the library
+
+```bash
+yarn add @scripting-space/scribble
+```
+
+```tsx
+import { ScribbleDashboard, CodeEditor, registerScribblePlugin } from '@scripting-space/scribble';
+```
+
+Requires `react` / `react-dom` ≥ 18 in the consuming app (Vite / webpack /
+any bundler that resolves the ESM output).
+
 ## Quick Start
 
 ```bash

@@ -55,6 +55,11 @@ jobs:
             - name: Build
               run: yarn build
 
+            # Also compile the npm library build (lib/) so the publishable
+            # output (everything exported from src/index.ts) is verified in CI
+            - name: Build library
+              run: yarn build:lib
+
             - name: Configure Pages
               uses: actions/configure-pages@v5
 

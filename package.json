@@ -1,0 +1,12 @@
+{
+    "name": "@scripting-space/scribble",
+    "version": "1.0.0",
+    "description": "Scripting Space Scribble",
+    "main": "src/index.ts",
+    "scripts": {
+        "test": "vitest run",
+        "typecheck": "tsc --noEmit"
+    },
+    "author": "NQQT",
+    "license": "ISC"
+}

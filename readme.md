@@ -7,6 +7,22 @@ capability (like the text file reader/editor) is a self-contained feature
 plugin that "plugs in" to the dashboard shell without the shell knowing
 anything about it.
 
+## Deployment (GitHub Pages)
+
+Every push to `main` automatically builds and deploys the site via
+`.github/workflows/deploy-pages.yml`: `yarn install` → test → typecheck →
+`vite build` (output `dist/`, relative `base: './'`) → `actions/deploy-pages`.
+Manual re-deploys are available via `workflow_dispatch`.
+
+Dependencies are pulled from npm: `@presource/core` and `@presource/react`.
+`@presource/core` is published; `@presource/react` is published from the
+NQQT/noobscript monorepo via its **Publish @presource packages** workflow
+(Actions tab, requires the `NPM_TOKEN` secret) — the Pages deploy fails at
+install until that has run once.
+
+One-time repo setting: **Settings → Pages → Build and deployment → Source:
+"GitHub Actions"**.
+
 ## Quick Start
 
 ```bash

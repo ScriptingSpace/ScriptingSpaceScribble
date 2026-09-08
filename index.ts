@@ -1,4 +1,5 @@
-import { ScribbleDashboard } from '@scripting-space/scribble';
+import { ScribbleDashboard } from './src/index';
 
-// TODO: This should be deployable to github page directly when every commit happens.
+// Deployed to GitHub Pages automatically on every push to main via
+// .github/workflows/deploy-pages.yml (builds with vite → dist/).
 console.log(ScribbleDashboard);

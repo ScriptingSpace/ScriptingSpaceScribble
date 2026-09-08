@@ -22,6 +22,6 @@ if (typeof Element !== 'undefined' && !Element.prototype.getBoundingClientRect) 
 }
 if (typeof Element !== 'undefined' && !Element.prototype.getClientRects) {
     Element.prototype.getClientRects = function () {
-        return [] as DOMRectList;
+        return [] as unknown as DOMRectList;
     };
 }

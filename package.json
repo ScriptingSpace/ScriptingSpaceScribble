@@ -1,6 +1,6 @@
 {
     "name": "@scripting-space/scribble",
-    "version": "1.0.0",
+    "version": "1.0.2",
     "description": "Scripting Space Scribble — plug-and-play dashboard that reads dropped .txt files and renders plain text output",
     "type": "module",
     "main": "lib/index.js",

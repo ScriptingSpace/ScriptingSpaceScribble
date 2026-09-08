@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { describe, it, expect, afterEach } from 'vitest';
 import { useStateHook } from '@presource/react';
 import { ScribbleFileProvider, scribbleFileStore } from './fileStore';
@@ -33,52 +33,166 @@ describe('readTextFile', () => {
 });
 
 describe('fileStore', () => {
-    // Minimal consumer that renders the current session file name
+    // Minimal consumer rendering the session summary: file names, active id
     const Consumer = () => {
         const store = scribbleFileStore();
-        return <div data-testid="store-consumer">{store.file ? store.file.name : 'no file'}</div>;
+        return (
+            <div data-testid="store-consumer">
+                {store.files.map((entry) => entry.name).join(',')}
+                {'|'}
+                {store.activeFileId ?? 'none'}
+            </div>
+        );
     };
 
-    // Harness mirroring the real dashboard session implementation
+    // Session controls driven through the STORE (like the tabs/editor do) —
+    // validates the real session implementation the dashboard injects
+    const StoreControls = () => {
+        // Capture the store during render — calling the accessor inside an
+        // event handler would be an invalid hook call
+        const store = scribbleFileStore();
+        return (
+            <>
+                <button
+                    type="button"
+                    data-testid="open-a"
+                    onClick={() => store.openFile({ name: 'a.txt', content: 'aaa' })}
+                />
+                <button
+                    type="button"
+                    data-testid="open-b"
+                    onClick={() => store.openFile({ name: 'b.txt', content: 'bbb' })}
+                />
+                <button
+                    type="button"
+                    data-testid="open-a-again"
+                    onClick={() => store.openFile({ name: 'a.txt', content: 'a2' })}
+                />
+                <button
+                    type="button"
+                    data-testid="select-a"
+                    onClick={() => store.selectFile('a.txt')}
+                />
+                <button
+                    type="button"
+                    data-testid="edit-active"
+                    onClick={() => {
+                        const active = store.files.find(
+                            (entry) => entry.name === store.activeFileId,
+                        );
+                        if (active) store.updateContent(active.name, 'edited');
+                    }}
+                />
+                <button
+                    type="button"
+                    data-testid="close-active"
+                    onClick={() => {
+                        if (store.activeFileId) store.closeFile(store.activeFileId);
+                    }}
+                />
+            </>
+        );
+    };
+
+    // Harness mirroring the real dashboard multi-file session implementation
     const Harness = () => {
-        const file = useStateHook<ScribbleFile | null>(null);
+        const files = useStateHook<ScribbleFile[]>([]);
+        const activeFileId = useStateHook<string | null>(null);
         const session = {
-            file: file(),
-            openFile: (next: ScribbleFile) => file(next),
-            updateContent: (content: string) => {
-                const current = file();
-                if (current) file({ name: current.name, content });
+            files: files(),
+            activeFileId: activeFileId(),
+            openFile: (next: ScribbleFile) => {
+                const current = files();
+                files(
+                    current.some((entry) => entry.name === next.name)
+                        ? current.map((entry) => (entry.name === next.name ? next : entry))
+                        : [...current, next],
+                );
+                activeFileId(next.name);
             },
-            closeFile: () => file(null),
+            selectFile: (name: string) => activeFileId(name),
+            updateContent: (name: string, content: string) => {
+                files(files().map((entry) => (entry.name === name ? { ...entry, content } : entry)));
+            },
+            closeFile: (name: string) => {
+                const remaining = files().filter((entry) => entry.name !== name);
+                files(remaining);
+                if (activeFileId() === name) {
+                    activeFileId(remaining.length ? remaining[remaining.length - 1].name : null);
+                }
+            },
         };
         return (
             <ScribbleFileProvider data={session}>
                 <Consumer />
-                <button
-                    type="button"
-                    data-testid="open-button"
-                    onClick={() => file({ name: 'session.txt', content: 'abc' })}
-                />
+                <StoreControls />
             </ScribbleFileProvider>
         );
     };
 
-    it('starts with no file and reflects openFile / closeFile through the context', async () => {
+    const sessionSummary = (): string => screen.getByTestId('store-consumer').textContent ?? '';
+
+    it('starts with no files and an empty active id', () => {
         render(<Harness />);
 
-        expect(screen.getByTestId('store-consumer').textContent).toBe('no file');
-
-        fireEvent.click(screen.getByTestId('open-button'));
-        await waitFor(() => {
-            expect(screen.getByTestId('store-consumer').textContent).toBe('session.txt');
-        });
+        expect(sessionSummary()).toBe('|none');
     });
 
-    it('resolves the store with the real session callbacks injected via provider data', () => {
+    it('openFile appends a tab and focuses it; a second file becomes the new active tab', () => {
         render(<Harness />);
 
-        // Outside the provider the store would be no-ops; inside it resolves
-        // to the injected session implementation
-        expect(screen.getByTestId('open-button')).toBeDefined();
+        fireEvent.click(screen.getByTestId('open-a'));
+        expect(sessionSummary()).toBe('a.txt|a.txt');
+
+        fireEvent.click(screen.getByTestId('open-b'));
+        expect(sessionSummary()).toBe('a.txt,b.txt|b.txt');
+    });
+
+    it('re-dropping an open file name replaces its content instead of duplicating the tab', () => {
+        render(<Harness />);
+
+        fireEvent.click(screen.getByTestId('open-a'));
+        fireEvent.click(screen.getByTestId('open-b'));
+        fireEvent.click(screen.getByTestId('open-a-again'));
+
+        // Still two tabs; a.txt is focused again with the replaced content
+        expect(sessionSummary()).toBe('a.txt,b.txt|a.txt');
+    });
+
+    it('selectFile switches the active tab', () => {
+        render(<Harness />);
+
+        fireEvent.click(screen.getByTestId('open-a'));
+        fireEvent.click(screen.getByTestId('open-b'));
+        fireEvent.click(screen.getByTestId('select-a'));
+
+        expect(sessionSummary()).toBe('a.txt,b.txt|a.txt');
+    });
+
+    it('updateContent edits exactly the targeted file', () => {
+        render(<Harness />);
+
+        fireEvent.click(screen.getByTestId('open-a'));
+        fireEvent.click(screen.getByTestId('open-b'));
+        fireEvent.click(screen.getByTestId('edit-active'));
+
+        // b.txt is active → only b.txt is edited; tabs and focus unchanged
+        expect(sessionSummary()).toBe('a.txt,b.txt|b.txt');
+    });
+
+    it('closeFile removes the tab and falls back to the most recent remaining tab', () => {
+        render(<Harness />);
+
+        fireEvent.click(screen.getByTestId('open-a'));
+        fireEvent.click(screen.getByTestId('open-b'));
+        fireEvent.click(screen.getByTestId('close-active'));
+
+        // b.txt closed → a.txt (most recent remaining) becomes active
+        expect(sessionSummary()).toBe('a.txt|a.txt');
+
+        fireEvent.click(screen.getByTestId('close-active'));
+
+        // Last tab closed → empty session
+        expect(sessionSummary()).toBe('|none');
     });
 });

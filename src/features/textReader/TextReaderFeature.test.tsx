@@ -1,6 +1,6 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { useStateHook } from '@presource/react';
 import { TextReaderFeature } from './TextReaderFeature';
 import { ScribbleFileProvider, scribbleFileStore } from '../../functions';
@@ -16,7 +16,9 @@ const readEditorText = (): string => {
     return editor.querySelector('.cm-content')?.textContent ?? '';
 };
 
-// Session session controls + store edit probe rendered inside the provider
+// Session edit probe rendered inside the provider — pushes an edit through
+// the shared store for the ACTIVE file, simulating the CodeMirror onChange
+// path without typing into contenteditable in jsdom
 const StoreEditButton = () => {
     // Capture the store during render — calling the accessor inside an event
     // handler would be an invalid hook call
@@ -25,33 +27,58 @@ const StoreEditButton = () => {
         <button
             type="button"
             data-testid="store-edit-button"
-            onClick={() => store.updateContent('edited via store')}
+            onClick={() => {
+                const active = store.files.find((entry) => entry.name === store.activeFileId);
+                if (active) store.updateContent(active.name, 'edited via store');
+            }}
         />
     );
 };
 
-// Harness mirroring the real dashboard session: owns the open-file state and
-// injects it into the shared provider exactly like ScribbleDashboard does.
-// The file starts closed; OpenButton simulates the global drop opening it.
+// Harness mirroring the real dashboard multi-file session: owns the session
+// state and injects it into the shared provider exactly like ScribbleDashboard
+// does. Files enter ONLY via the dashboard's global drop — the open-* buttons
+// here simulate drops of a.txt / b.txt.
 const Harness = ({ children }: { children: React.ReactNode }) => {
-    const file = useStateHook<ScribbleFile | null>(null);
+    const files = useStateHook<ScribbleFile[]>([]);
+    const activeFileId = useStateHook<string | null>(null);
     const session = {
-        file: file(),
-        openFile: (next: ScribbleFile) => file(next),
-        updateContent: (content: string) => {
-            const current = file();
-            if (current) file({ name: current.name, content });
+        files: files(),
+        activeFileId: activeFileId(),
+        openFile: (next: ScribbleFile) => {
+            const current = files();
+            files(
+                current.some((entry) => entry.name === next.name)
+                    ? current.map((entry) => (entry.name === next.name ? next : entry))
+                    : [...current, next],
+            );
+            activeFileId(next.name);
         },
-        closeFile: () => file(null),
+        selectFile: (name: string) => activeFileId(name),
+        updateContent: (name: string, content: string) => {
+            files(files().map((entry) => (entry.name === name ? { ...entry, content } : entry)));
+        },
+        closeFile: (name: string) => {
+            const remaining = files().filter((entry) => entry.name !== name);
+            files(remaining);
+            if (activeFileId() === name) {
+                activeFileId(remaining.length ? remaining[remaining.length - 1].name : null);
+            }
+        },
     };
     return (
         <ScribbleFileProvider data={session}>
             {children}
-            {/* Simulates the dashboard's global drop opening a file */}
+            {/* Simulate drops through the session contract */}
             <button
                 type="button"
-                data-testid="session-open-button"
-                onClick={() => file({ name: 'notes.txt', content: 'hello scribble' })}
+                data-testid="drop-a"
+                onClick={() => session.openFile({ name: 'a.txt', content: 'content a' })}
+            />
+            <button
+                type="button"
+                data-testid="drop-b"
+                onClick={() => session.openFile({ name: 'b.txt', content: 'content b' })}
             />
             <StoreEditButton />
         </ScribbleFileProvider>
@@ -59,88 +86,148 @@ const Harness = ({ children }: { children: React.ReactNode }) => {
 };
 
 describe('TextReaderFeature', () => {
-    it('renders the browse affordance and hidden file input when no file is open', () => {
+    it('renders nothing when no file is open (drop-only flow)', () => {
         render(
             <Harness>
                 <TextReaderFeature />
             </Harness>,
         );
 
-        expect(screen.getByTestId('browse-button').textContent).toBe(
-            'Browse for a .txt file — or drop it anywhere',
-        );
-        expect(screen.getByTestId('file-input')).toBeDefined();
+        // The dashed content-area outline on the dashboard is the only
+        // affordance in this state
+        expect(screen.queryByTestId('text-reader-session')).toBeNull();
+        expect(screen.queryByTestId('tab-bar')).toBeNull();
         expect(screen.queryByTestId('text-reader-editor')).toBeNull();
     });
 
-    it('opens the native file dialog when the browse button is clicked', () => {
+    it('shows a tab and the full-area editor for a dropped file', async () => {
         render(
             <Harness>
                 <TextReaderFeature />
             </Harness>,
         );
 
-        const clickSpy = vi.spyOn(HTMLInputElement.prototype, 'click');
-        fireEvent.click(screen.getByTestId('browse-button'));
-        expect(clickSpy).toHaveBeenCalledTimes(1);
-        clickSpy.mockRestore();
-    });
-
-    it('shows the code editor for the opened file session', async () => {
-        render(
-            <Harness>
-                <TextReaderFeature />
-            </Harness>,
-        );
-
-        // Simulates the dashboard's global drop opening the file
-        fireEvent.click(screen.getByTestId('session-open-button'));
+        // Simulates the dashboard's global drop opening a.txt
+        fireEvent.click(screen.getByTestId('drop-a'));
 
         await waitFor(() => {
-            expect(readEditorText()).toBe('hello scribble');
+            expect(readEditorText()).toBe('content a');
         });
-        expect(screen.getByText('Editing: notes.txt')).toBeDefined();
-        expect(screen.queryByTestId('browse-button')).toBeNull();
+        expect(screen.getByTestId('tab-bar').textContent).toBe('a.txt×');
+        expect(screen.getByTestId('file-tab-a.txt')).toBeDefined();
     });
 
-    it('reflects edits pushed through the shared store (controlled editor)', async () => {
+    it('gives each dropped file its own tab, activating the latest drop', async () => {
         render(
             <Harness>
                 <TextReaderFeature />
             </Harness>,
         );
 
-        fireEvent.click(screen.getByTestId('session-open-button'));
+        fireEvent.click(screen.getByTestId('drop-a'));
         await waitFor(() => {
-            expect(readEditorText()).toBe('hello scribble');
+            expect(readEditorText()).toBe('content a');
         });
 
-        // Same path the CodeMirror onChange handler uses
+        fireEvent.click(screen.getByTestId('drop-b'));
+
+        // Two tabs; b.txt (the latest drop) is active and shown in the editor
+        await waitFor(() => {
+            expect(readEditorText()).toBe('content b');
+        });
+        expect(screen.getByTestId('file-tab-a.txt')).toBeDefined();
+        expect(screen.getByTestId('file-tab-b.txt')).toBeDefined();
+        expect(screen.getByTestId('file-tab-a.txt').getAttribute('aria-selected')).toBe('false');
+        expect(screen.getByTestId('file-tab-b.txt').getAttribute('aria-selected')).toBe('true');
+    });
+
+    it('switches the editor content when a tab is clicked', async () => {
+        render(
+            <Harness>
+                <TextReaderFeature />
+            </Harness>,
+        );
+
+        fireEvent.click(screen.getByTestId('drop-a'));
+        fireEvent.click(screen.getByTestId('drop-b'));
+        await waitFor(() => {
+            expect(readEditorText()).toBe('content b');
+        });
+
+        fireEvent.click(screen.getByTestId('file-tab-a.txt'));
+
+        await waitFor(() => {
+            expect(readEditorText()).toBe('content a');
+        });
+        expect(screen.getByTestId('file-tab-a.txt').getAttribute('aria-selected')).toBe('true');
+    });
+
+    it('reflects edits pushed through the shared store for the active file', async () => {
+        render(
+            <Harness>
+                <TextReaderFeature />
+            </Harness>,
+        );
+
+        fireEvent.click(screen.getByTestId('drop-a'));
+        fireEvent.click(screen.getByTestId('drop-b'));
+        await waitFor(() => {
+            expect(readEditorText()).toBe('content b');
+        });
+
+        // Same path the CodeMirror onChange handler uses (active file: b.txt)
         fireEvent.click(screen.getByTestId('store-edit-button'));
 
         await waitFor(() => {
             expect(readEditorText()).toBe('edited via store');
         });
+
+        // Switch to a.txt — its content must be untouched
+        fireEvent.click(screen.getByTestId('file-tab-a.txt'));
+        await waitFor(() => {
+            expect(readEditorText()).toBe('content a');
+        });
     });
 
-    it('closes the file and returns to the browse affordance', async () => {
+    it('closes a tab via its × and falls back to the most recent remaining tab', async () => {
         render(
             <Harness>
                 <TextReaderFeature />
             </Harness>,
         );
 
-        fireEvent.click(screen.getByTestId('session-open-button'));
+        fireEvent.click(screen.getByTestId('drop-a'));
+        fireEvent.click(screen.getByTestId('drop-b'));
         await waitFor(() => {
-            expect(screen.getByTestId('text-reader-editor')).toBeDefined();
+            expect(readEditorText()).toBe('content b');
         });
 
-        fireEvent.click(screen.getByTestId('close-file-button'));
+        // Close b.txt (the active tab)
+        fireEvent.click(screen.getByTestId('close-tab-b.txt'));
 
         await waitFor(() => {
-            expect(screen.getByTestId('browse-button')).toBeDefined();
+            expect(readEditorText()).toBe('content a');
         });
-        expect(screen.queryByTestId('text-reader-editor')).toBeNull();
+        expect(screen.queryByTestId('file-tab-b.txt')).toBeNull();
+    });
+
+    it('closes the last tab and returns to the empty drop-only state', async () => {
+        render(
+            <Harness>
+                <TextReaderFeature />
+            </Harness>,
+        );
+
+        fireEvent.click(screen.getByTestId('drop-a'));
+        await waitFor(() => {
+            expect(readEditorText()).toBe('content a');
+        });
+
+        fireEvent.click(screen.getByTestId('close-tab-a.txt'));
+
+        await waitFor(() => {
+            expect(screen.queryByTestId('text-reader-session')).toBeNull();
+        });
     });
 
     it('registers itself as a plugin in the registry', async () => {

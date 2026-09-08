@@ -84,13 +84,19 @@ file dropped anywhere on screen goes through the same session:
 1. `ScribbleDashboard` owns the open-file state (`ScribbleFile = { name, content }`)
    and injects `openFile` / `updateContent` / `closeFile` into the
    `ScribbleFileProvider` context (built on `localContextStore`).
-2. The dashboard root element (`min-height: 100vh`) handles `onDrop` /
-   `onDragOver` / `onDragLeave` globally, reads the file via `readTextFile()`
-   (a `FileReader` → `Promise<ScribbleFile>` helper) and opens the session. A
-   full-viewport "Drop to open a file" overlay shows while dragging.
+2. The dashboard root element (`100% × 100%`, `overflow: hidden`) handles
+   `onDrop` / `onDragOver` / `onDragLeave` globally, reads the file via
+   `readTextFile()` (a `FileReader` → `Promise<ScribbleFile>` helper) and opens
+   it in the session. The page is a fixed three-area layout — **header /
+   content / footer** — and a **dashed drop outline covers the content area**
+   (inset 12px, absolutely positioned inside it) but **only while no file is
+   open**; once files are open the tab strip takes over (dropping more files
+   still works anywhere on the page).
 3. Any plugin reads the session with `const store = scribbleFileStore()` and
-   renders accordingly. The text-reader plugin shows the `CodeEditor` when a
-   file is open and a local drop zone when not.
+   renders accordingly. The text-reader plugin renders **one tab per open
+   file** plus a full-area `CodeEditor` for the active tab — or nothing when
+   no file is open (files enter by dropping only; there are no browse
+   buttons).
 
 Edits are a controlled loop: `CodeMirror` fires `onChange` →
 `store.updateContent(content)` → the provider context updates → the editor
@@ -118,21 +124,38 @@ Shared, self-contained components any feature can compose (all styled with
 | Component | Props | Purpose |
 |---|---|---|
 | `CodeEditor` | `value`, `onChange`, `testId?` | Controlled CodeMirror 6 editor (via `@uiw/react-codemirror`, dark theme, 320px). Line numbers, bracket matching, undo history out of the box. Test id: `code-editor` / custom. |
-| `FileDropZone` | `dragOver`, `title`, `hint`, `onClick`, `onDrop`, `onDragOver`, `onDragLeave` | Visual + interaction shell for drag & drop. `role="button"` with Enter/Space keyboard activation for the click-to-browse fallback. Test id: `file-drop-zone`. |
+| `FileDropZone` | `dragOver`, `title`, `hint`, `onClick`, `onDrop`, `onDragOver`, `onDragLeave` | Local drag & drop shell with `role="button"` + Enter/Space keyboard activation. Available for plugins that scope drops to a region (the dashboard's global viewport-wide outline covers the drop-anywhere case). |
 | `PlainTextOutput` | `text` | Verbatim plain-text rendering (`pre-wrap`, monospace, scrollable). Test id: `plain-text-output`. |
-| `PluginPanel` | `title`, `description`, `children` | The modular card the dashboard wraps every plugin in. Test id: `plugin-panel`. |
+| `PluginPanel` | `title`, `description?`, `children` | The modular card the dashboard wraps every plugin in. `description` is optional — omit for plugins that need no explanation. Test id: `plugin-panel`. |
 
 ## Current Behavior
 
-- **Global drop.** A `.txt` file dropped anywhere on the page opens in the
-  editor; a full-screen overlay highlights while dragging.
+- **Global drop, per-file tabs.** The page is a fixed header / content /
+  footer layout; a dashed outline (inset 12px) covers the content area **only
+  while no file is open** — a `.txt` file dropped anywhere on the page opens
+  in its own tab, and further drops add more tabs. While dragging (with no
+  files open) the outline intensifies with a scrim + label.
+- **Tabs.** Every dropped file gets its own tab (tab strip above the editor).
+  **Multi-file drops load every file** (not just the first), each in its own
+  tab in drop order — the last file of the drop becomes the active tab. Click
+  a tab to switch; the × on a tab closes it (closing the active tab falls
+  back to the most recent remaining one). Re-dropping a file whose name
+  matches an open tab replaces that tab's content instead of duplicating it.
+- **Editable.** The active file renders in a CodeMirror 6 editor — line
+  numbers, undo/redo history, bracket matching. Edits update the shared file
+  session live (in memory only — no persistence yet).
+- **Drop-only entry.** There are no browse buttons or click-to-open paths —
+  dropping a file on the page is the only way in.
+- **No panel chrome.** Plugin surfaces render directly in the content area
+  (no "Text File Reader" card) — the tab strip + editor fill the region when
+  files are open; the area shows only the dashed outline when not.
 - **Editable.** Opened files render in a CodeMirror 6 editor — line numbers,
   undo/redo history, bracket matching. Edits update the shared file session
   live (in memory only — no persistence yet).
 - **Read only parsing, no patterns yet.** Content is read and rendered
   verbatim; pattern extraction is a planned plugin capability.
 - The file name is shown above the editor with a **Close** button that returns
-  to the drop zone. Dropping a second file replaces the session.
+  to the empty drop state. Dropping a second file replaces the session.
 - The hidden file input accepts `.txt`, `.text`, and `text/plain`.
 
 ### Why CodeMirror 6 (and not Monaco)?

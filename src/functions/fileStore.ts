@@ -1,21 +1,30 @@
 import { localContextStore } from '@presource/react';
 
-// A file opened on the dashboard: name for display, content is the live
-// editable text (kept in sync as the user edits in the code editor).
+// A file opened on the dashboard. `name` doubles as the stable tab id:
+// dropping a file whose name matches an open tab replaces that tab's content
+// (re-load); a new name appends a new tab.
 export type ScribbleFile = {
     name: string;
     content: string;
 };
 
-// Shared "open file" session contract. The dashboard owns the real
+// Shared multi-file session contract. The dashboard owns the real
 // implementation and injects it via the provider `data` prop; plugins consume
-// it through scribbleFileStore(). Defaults are no-ops so consumers render
-// safely even without a provider.
+// it through scribbleFileStore(). Defaults are no-ops / empty so consumers
+// render safely even without a provider.
 export type ScribbleFileContext = {
-    file: ScribbleFile | null;
+    // All open files, in tab order
+    files: ScribbleFile[];
+    // Currently selected tab (a file name), null when nothing is open
+    activeFileId: string | null;
+    // Drop entry point: appends (or replaces same-name) and focuses the tab
     openFile: (file: ScribbleFile) => void;
-    updateContent: (content: string) => void;
-    closeFile: () => void;
+    // Tab click: make this file the active one
+    selectFile: (name: string) => void;
+    // Editor edits: update one open file's content
+    updateContent: (name: string, content: string) => void;
+    // Tab close (×): remove the file; if it was active, focus the latest tab
+    closeFile: (name: string) => void;
 };
 
 // Cross-reference: ScribbleDashboard.tsx wraps the tree in the provider and
@@ -24,8 +33,10 @@ export const {
     ContextProvider: ScribbleFileProvider,
     contextStore: scribbleFileStore,
 } = localContextStore<ScribbleFileContext>({
-    file: null,
+    files: [],
+    activeFileId: null,
     openFile: () => {},
+    selectFile: () => {},
     updateContent: () => {},
     closeFile: () => {},
 });

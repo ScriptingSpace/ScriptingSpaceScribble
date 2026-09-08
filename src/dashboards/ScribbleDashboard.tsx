@@ -1,6 +1,6 @@
 import React from 'react';
+import { arrayEach } from '@presource/core';
 import { styledComponent, useStateHook } from '@presource/react';
-import { PluginPanel } from '../components';
 import {
     getScribblePlugins,
     readTextFile,
@@ -14,10 +14,10 @@ import '../features';
 
 // ─── Styled shell ────────────────────────────────────────────────────────────
 
-// Dashboard shell — dark, modern, grid of plugin panels.
+// Dashboard shell — dark, modern, three-area layout (header / content / footer).
 // Locked to the exact viewport (100% × 100%) — the html/body/#root chain is
 // zero-margin and overflow:hidden via src/app.css, so no window scrollbar.
-// The plugin area below scrolls internally instead (ContentArea).
+// Plugin surfaces render directly in the content area (no panel chrome).
 const DashboardRoot = styledComponent('div', {
     height: '100%',
     width: '100%',
@@ -58,24 +58,32 @@ const HeaderSubtitle = styledComponent('p', {
     color: '#94a3b8',
 });
 
-// Scrollable content region under the fixed header — owns the internal
-// scrollbar so the page itself never scrolls (viewport stays 100vh × 100vw)
+// Content region between the header and footer. It is a positioned,
+// non-scrolling frame: the dashed drop outline is absolutely positioned
+// inside it (covering only this area), and an inner ScrollRegion owns the
+// internal scrollbar so the page itself never scrolls (100vh × 100vw lock).
 const ContentArea = styledComponent('div', {
     flex: 1,
     minHeight: 0,
-    overflowY: 'auto' as const,
+    position: 'relative' as const,
     width: '100%',
+    overflow: 'hidden' as const,
 });
 
-const PluginGrid = styledComponent('div', {
-    display: 'grid',
-    gridTemplateColumns: () => ({ xs: '1fr', md: '1fr 1fr' }),
-    gap: 16,
-    padding: 16,
-    maxWidth: 1200,
-    margin: '0 auto',
+// Inner scroll container — the only element that scrolls
+const ScrollRegion = styledComponent('div', {
+    height: '100%',
     width: '100%',
-    boxSizing: 'border-box' as const,
+    overflowY: 'auto' as const,
+});
+
+// Full-area surface each plugin renders into — no card chrome; plugins own
+// their layout and fill (or not fill) this region as they see fit
+const PluginSurface = styledComponent('div', {
+    minHeight: '100%',
+    width: '100%',
+    display: 'flex',
+    flexDirection: 'column',
 });
 
 const EmptyState = styledComponent('div', {
@@ -86,16 +94,37 @@ const EmptyState = styledComponent('div', {
     color: '#64748b',
 });
 
-// Viewport-wide dashed outline — ALWAYS visible so every point on the screen
-// reads as droppable. It intensifies (accent border + scrim + label) while a
-// drag is in progress. pointerEvents: none keeps the UI underneath clickable.
+// Footer bar — third page area (header / content / footer)
+const FooterBar = styledComponent('footer', {
+    padding: '10px 16px',
+    background: '#0b1120',
+    borderTop: '1px solid #1e293b',
+});
+
+const FooterInner = styledComponent('div', {
+    maxWidth: 1200,
+    margin: '0 auto',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    fontSize: 12,
+    color: '#64748b',
+});
+
+// Dashed drop outline covering ONLY the content area (absolute inside
+// ContentArea — not the viewport), inset 12px so it floats with breathing
+// room from the header/footer borders and window edges. ALWAYS visible so
+// the whole content region reads as droppable. It intensifies (accent
+// border + scrim + label) while a drag is in progress. pointerEvents: none
+// keeps the plugin UI underneath fully clickable.
 const DropOutline = styledComponent<{ active: boolean }>('div', {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    zIndex: 100,
+    position: 'absolute',
+    top: 12,
+    left: 12,
+    right: 12,
+    bottom: 12,
+    zIndex: 10,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -110,22 +139,44 @@ const DropOutline = styledComponent<{ active: boolean }>('div', {
 
 // ─── Dashboard composition ───────────────────────────────────────────────────
 
-// Top-level wrapper: owns the open-file session state and shares it with all
+// Top-level wrapper: owns the multi-file session state and shares it with all
 // plugins through the ScribbleFileProvider context (src/functions/fileStore.ts).
+// Each dropped file becomes its own tab; a re-drop of the same file name
+// replaces that tab's content.
 export const ScribbleDashboard = React.memo(() => {
-    // The currently open file session (name + live editable content)
-    const file = useStateHook<ScribbleFile | null>(null);
+    // All open files, in tab order
+    const files = useStateHook<ScribbleFile[]>([]);
+    // Currently selected tab (a file name), null when nothing is open
+    const activeFileId = useStateHook<string | null>(null);
 
     // Real session implementation injected into the plugin-facing context.
-    // updateContent re-creates the object so subscribers see the new content.
+    // Every mutation re-creates the array/object so subscribers see updates.
     const session = {
-        file: file(),
-        openFile: (next: ScribbleFile) => file(next),
-        updateContent: (content: string) => {
-            const current = file();
-            if (current) file({ name: current.name, content });
+        files: files(),
+        activeFileId: activeFileId(),
+        openFile: (next: ScribbleFile) => {
+            const current = files();
+            // Same name → replace that tab's content (re-load);
+            // new name → append a new tab. Either way it becomes active.
+            files(
+                current.some((entry) => entry.name === next.name)
+                    ? current.map((entry) => (entry.name === next.name ? next : entry))
+                    : [...current, next],
+            );
+            activeFileId(next.name);
         },
-        closeFile: () => file(null),
+        selectFile: (name: string) => activeFileId(name),
+        updateContent: (name: string, content: string) => {
+            files(files().map((entry) => (entry.name === name ? { ...entry, content } : entry)));
+        },
+        closeFile: (name: string) => {
+            const remaining = files().filter((entry) => entry.name !== name);
+            files(remaining);
+            // If the closed tab was active, fall back to the most recent tab
+            if (activeFileId() === name) {
+                activeFileId(remaining.length ? remaining[remaining.length - 1].name : null);
+            }
+        },
     };
 
     return (
@@ -149,12 +200,14 @@ const DashboardShell = () => {
         event.preventDefault();
         event.stopPropagation();
         dragOver(false);
-        const file = event.dataTransfer.files[0];
-        if (file) {
-            // Read asynchronously, then open the file session through the
-            // shared context so every plugin can react to it
-            readTextFile(file).then(store.openFile);
-        }
+        // Load EVERY dropped file, not just the first — each becomes its own
+        // tab. Promise.all keeps the read order deterministic so the last
+        // file in the drop ends up as the active tab.
+        const dropped = Array.from(event.dataTransfer.files);
+        if (dropped.length === 0) return;
+        Promise.all(dropped.map(readTextFile)).then((opened) => {
+            arrayEach(opened, (entry) => store.openFile(entry.value));
+        });
     };
 
     const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
@@ -188,30 +241,40 @@ const DashboardShell = () => {
                     </HeaderSubtitle>
                 </HeaderInner>
             </HeaderBar>
-            {/* Content area owns the internal scrollbar — the page itself
-                never scrolls, keeping the viewport locked at 100vh × 100vw */}
+            {/* Content area: header / content / footer — the dashed outline
+                lives INSIDE here (absolute), the ScrollRegion owns the
+                internal scrollbar, the page itself never scrolls. Plugin
+                surfaces render directly, no panel chrome. */}
             <ContentArea>
-                {plugins.length === 0 ? (
-                    <EmptyState>No plugins registered yet.</EmptyState>
-                ) : (
-                    <PluginGrid>
-                        {plugins.map((plugin) => (
-                            <PluginPanel
-                                key={plugin.id}
-                                title={plugin.title}
-                                description={plugin.description}
-                            >
+                <ScrollRegion>
+                    {plugins.length === 0 ? (
+                        <EmptyState>No plugins registered yet.</EmptyState>
+                    ) : (
+                        plugins.map((plugin) => (
+                            <PluginSurface key={plugin.id}>
                                 <plugin.Component />
-                            </PluginPanel>
-                        ))}
-                    </PluginGrid>
-                )}
+                            </PluginSurface>
+                        ))
+                    )}
+                </ScrollRegion>
+                {/* The dashed outline is the empty-state drop affordance: it
+                    only shows while NO file is open. Once files are open the
+                    tabs + editor take over and the outline disappears
+                    (dropping more files still works — the root handles it). */}
+                {store.files.length === 0 ? (
+                    <DropOutline active={dragOver()} data-testid="drop-outline">
+                        {dragOver() ? 'Drop to open a file' : null}
+                    </DropOutline>
+                ) : null}
             </ContentArea>
-            {/* Viewport-wide dashed outline: always visible (drop anywhere),
-                with scrim + label while a drag is active */}
-            <DropOutline active={dragOver()} data-testid="drop-outline">
-                {dragOver() ? 'Drop to open a file' : null}
-            </DropOutline>
+            <FooterBar data-testid="dashboard-footer">
+                <FooterInner>
+                    <span>Scribble Dashboard</span>
+                    <span>
+                        {plugins.length} plugin{plugins.length === 1 ? '' : 's'} loaded
+                    </span>
+                </FooterInner>
+            </FooterBar>
         </DashboardRoot>
     );
 };

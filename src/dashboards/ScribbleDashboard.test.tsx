@@ -139,10 +139,13 @@ describe('ScribbleDashboard', () => {
         });
     });
 
-    it('renders the footer with the loaded plugin count', () => {
+    it('renders the footer with the loaded plugin count and the package version', () => {
         render(<ScribbleDashboard />);
 
+        // The version suffix comes from the compile-time __APP_VERSION__
+        // constant (vitest.config.ts `define` reads it from package.json —
+        // currently 1.0.2); update this assertion when bumping the version.
         const footer = screen.getByTestId('dashboard-footer');
-        expect(footer.textContent).toBe('Scribble Dashboard1 plugin loaded');
+        expect(footer.textContent).toBe('Scribble Dashboard1 plugin loaded · v1.0.2');
     });
 });

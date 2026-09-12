@@ -86,6 +86,29 @@ const Harness = ({ children }: { children: React.ReactNode }) => {
 };
 
 describe('TextReaderFeature', () => {
+    it('registers itself as a renderFile content plugin in the registry', async () => {
+        // Import inside the test so vitest module isolation gives a fresh registry
+        const { getScribblePlugins } = await import('../../functions');
+        const { TextReaderFeature: FreshFeature } = await import('./TextReaderFeature');
+
+        render(
+            <Harness>
+                <FreshFeature />
+            </Harness>,
+        );
+
+        const plugin = getScribblePlugins().find((entry) => entry.id === 'text-reader');
+        // Must exist with the exact definition the dashboard executes
+        expect(plugin).toEqual({
+            id: 'text-reader',
+            label: 'Editor',
+            title: 'Text File Reader',
+            description: undefined,
+            slots: undefined,
+            renderFile: plugin?.renderFile,
+        });
+    });
+
     it('renders nothing when no file is open (drop-only flow)', () => {
         render(
             <Harness>
@@ -96,11 +119,10 @@ describe('TextReaderFeature', () => {
         // The dashed content-area outline on the dashboard is the only
         // affordance in this state
         expect(screen.queryByTestId('text-reader-session')).toBeNull();
-        expect(screen.queryByTestId('tab-bar')).toBeNull();
         expect(screen.queryByTestId('text-reader-editor')).toBeNull();
     });
 
-    it('shows a tab and the full-area editor for a dropped file', async () => {
+    it('renders the full-area editor for the open file (no own tab strip — the dashboard owns plugin tabs)', async () => {
         render(
             <Harness>
                 <TextReaderFeature />
@@ -113,35 +135,13 @@ describe('TextReaderFeature', () => {
         await waitFor(() => {
             expect(readEditorText()).toBe('content a');
         });
-        expect(screen.getByTestId('tab-bar').textContent).toBe('a.txt×');
-        expect(screen.getByTestId('file-tab-a.txt')).toBeDefined();
+        expect(screen.getByTestId('text-reader-session')).toBeDefined();
+        // The feature no longer renders its own tab strip — files live in
+        // the LEFT sidebar, plugin tabs are owned by the dashboard
+        expect(screen.queryByTestId('tab-bar')).toBeNull();
     });
 
-    it('gives each dropped file its own tab, activating the latest drop', async () => {
-        render(
-            <Harness>
-                <TextReaderFeature />
-            </Harness>,
-        );
-
-        fireEvent.click(screen.getByTestId('drop-a'));
-        await waitFor(() => {
-            expect(readEditorText()).toBe('content a');
-        });
-
-        fireEvent.click(screen.getByTestId('drop-b'));
-
-        // Two tabs; b.txt (the latest drop) is active and shown in the editor
-        await waitFor(() => {
-            expect(readEditorText()).toBe('content b');
-        });
-        expect(screen.getByTestId('file-tab-a.txt')).toBeDefined();
-        expect(screen.getByTestId('file-tab-b.txt')).toBeDefined();
-        expect(screen.getByTestId('file-tab-a.txt').getAttribute('aria-selected')).toBe('false');
-        expect(screen.getByTestId('file-tab-b.txt').getAttribute('aria-selected')).toBe('true');
-    });
-
-    it('switches the editor content when a tab is clicked', async () => {
+    it('follows the active file switch (sidebar selection drives the editor content)', async () => {
         render(
             <Harness>
                 <TextReaderFeature />
@@ -154,12 +154,12 @@ describe('TextReaderFeature', () => {
             expect(readEditorText()).toBe('content b');
         });
 
-        fireEvent.click(screen.getByTestId('file-tab-a.txt'));
+        // Simulates a sidebar entry click selecting a.txt
+        fireEvent.click(screen.getByTestId('drop-a'));
 
         await waitFor(() => {
             expect(readEditorText()).toBe('content a');
         });
-        expect(screen.getByTestId('file-tab-a.txt').getAttribute('aria-selected')).toBe('true');
     });
 
     it('reflects edits pushed through the shared store for the active file', async () => {
@@ -182,72 +182,10 @@ describe('TextReaderFeature', () => {
             expect(readEditorText()).toBe('edited via store');
         });
 
-        // Switch to a.txt — its content must be untouched
-        fireEvent.click(screen.getByTestId('file-tab-a.txt'));
-        await waitFor(() => {
-            expect(readEditorText()).toBe('content a');
-        });
-    });
-
-    it('closes a tab via its × and falls back to the most recent remaining tab', async () => {
-        render(
-            <Harness>
-                <TextReaderFeature />
-            </Harness>,
-        );
-
-        fireEvent.click(screen.getByTestId('drop-a'));
-        fireEvent.click(screen.getByTestId('drop-b'));
-        await waitFor(() => {
-            expect(readEditorText()).toBe('content b');
-        });
-
-        // Close b.txt (the active tab)
-        fireEvent.click(screen.getByTestId('close-tab-b.txt'));
-
-        await waitFor(() => {
-            expect(readEditorText()).toBe('content a');
-        });
-        expect(screen.queryByTestId('file-tab-b.txt')).toBeNull();
-    });
-
-    it('closes the last tab and returns to the empty drop-only state', async () => {
-        render(
-            <Harness>
-                <TextReaderFeature />
-            </Harness>,
-        );
-
+        // Switch back to a.txt — its content must be untouched
         fireEvent.click(screen.getByTestId('drop-a'));
         await waitFor(() => {
             expect(readEditorText()).toBe('content a');
-        });
-
-        fireEvent.click(screen.getByTestId('close-tab-a.txt'));
-
-        await waitFor(() => {
-            expect(screen.queryByTestId('text-reader-session')).toBeNull();
-        });
-    });
-
-    it('registers itself as a plugin in the registry', async () => {
-        // Import inside the test so vitest module isolation gives a fresh registry
-        const { getScribblePlugins } = await import('../../functions');
-        const { TextReaderFeature: FreshFeature } = await import('./TextReaderFeature');
-
-        render(
-            <Harness>
-                <FreshFeature />
-            </Harness>,
-        );
-
-        const plugin = getScribblePlugins().find((entry) => entry.id === 'text-reader');
-        // Must exist with the exact definition the dashboard renders
-        expect(plugin).toEqual({
-            id: 'text-reader',
-            title: 'Text File Reader',
-            description: undefined,
-            Component: plugin?.Component,
         });
     });
 });

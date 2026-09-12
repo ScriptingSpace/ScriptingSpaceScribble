@@ -1,9 +1,17 @@
 import React from 'react';
 import { styledComponent } from '@presource/react';
+import {
+    PALETTE_ACCENT,
+    PALETTE_BORDER,
+    PALETTE_TEXT_BODY,
+    PALETTE_TEXT_FAINT,
+    PALETTE_TEXT_MUTED,
+} from '../functions';
 
 // Visual + interaction shell of a drop zone. It is fully prop-driven so any
 // feature can reuse it: the feature owns the file-reading logic and simply
-// wires the drag/keyboard handlers in (see features/textReader).
+// wires the drag/keyboard handlers in (see features/textReader). Tokyo Night
+// palette: blue dashed accent on drag-over, muted resting state.
 const Zone = styledComponent<{ dragOver: boolean }>(
     'div',
     {
@@ -15,9 +23,10 @@ const Zone = styledComponent<{ dragOver: boolean }>(
         minHeight: 160,
         padding: 24,
         borderRadius: 12,
-        border: ({ dragOver }) => `2px dashed ${dragOver ? '#38bdf8' : '#334155'}`,
-        background: ({ dragOver }) => (dragOver ? 'rgba(56, 189, 248, 0.08)' : 'rgba(15, 23, 42, 0.4)'),
-        color: '#94a3b8',
+        border: ({ dragOver }) => `2px dashed ${dragOver ? PALETTE_ACCENT : PALETTE_BORDER}`,
+        background: ({ dragOver }) =>
+            dragOver ? 'rgba(122, 162, 247, 0.08)' : 'rgba(26, 27, 38, 0.4)',
+        color: PALETTE_TEXT_MUTED,
         cursor: 'pointer',
         textAlign: 'center' as const,
         transition: 'border-color 150ms ease, background 150ms ease',
@@ -30,12 +39,12 @@ const Zone = styledComponent<{ dragOver: boolean }>(
 const ZoneTitle = styledComponent('div', {
     fontSize: 15,
     fontWeight: 600,
-    color: '#e2e8f0',
+    color: PALETTE_TEXT_BODY,
 });
 
 const ZoneHint = styledComponent('div', {
     fontSize: 12,
-    color: '#64748b',
+    color: PALETTE_TEXT_FAINT,
 });
 
 export type FileDropZoneProps = {

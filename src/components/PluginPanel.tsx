@@ -1,17 +1,24 @@
 import React from 'react';
 import { styledComponent } from '@presource/react';
+import {
+    PALETTE_BORDER,
+    PALETTE_SURFACE,
+    PALETTE_TEXT_BRIGHT,
+    PALETTE_TEXT_MUTED,
+} from '../functions';
 
 // Modular panel that wraps every plugin rendered by the dashboard.
 // Gives all features a consistent card look: title, description, content slot.
+// Warm palette: raised surface + warm border + soft warm shadow.
 const Panel = styledComponent('section', {
     display: 'flex',
     flexDirection: 'column',
     gap: 12,
     padding: 16,
     borderRadius: 16,
-    background: '#111c30',
-    border: '1px solid #1e293b',
-    boxShadow: '0 8px 24px rgba(2, 6, 23, 0.35)',
+    background: PALETTE_SURFACE,
+    border: `1px solid ${PALETTE_BORDER}`,
+    boxShadow: '0 8px 24px rgba(28, 27, 26, 0.35)',
     boxSizing: 'border-box' as const,
     minWidth: 0,
 });
@@ -20,14 +27,14 @@ const PanelTitle = styledComponent('h2', {
     margin: 0,
     fontSize: 18,
     fontWeight: 600,
-    color: '#f1f5f9',
+    color: PALETTE_TEXT_BRIGHT,
 });
 
 const PanelDescription = styledComponent('p', {
     margin: 0,
     fontSize: 13,
     lineHeight: 1.5,
-    color: '#94a3b8',
+    color: PALETTE_TEXT_MUTED,
 });
 
 export type PluginPanelProps = {

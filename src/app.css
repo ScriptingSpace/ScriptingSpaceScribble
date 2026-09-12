@@ -19,8 +19,11 @@ body,
 }
 
 body {
-    background: #0f172a;
-    color: #e2e8f0;
+    /* Blue-violet dark (Tokyo Night Storm bg) — matches PALETTE_BACKGROUND
+       in src/functions/palette.ts; CSS here stays raw since the dashboard
+       root overrides it anyway (kept in sync manually) */
+    background: #24283b;
+    color: #a9b1d6;
     font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
         sans-serif;
     -webkit-font-smoothing: antialiased;

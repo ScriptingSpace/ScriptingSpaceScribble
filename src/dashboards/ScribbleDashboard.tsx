@@ -195,16 +195,6 @@ const TabPanel = styledComponent('div', {
     overflow: 'hidden' as const,
 });
 
-// Full-area surface a single-contributor plugin renders into (no tab bar) —
-// same height-lock as TabPanel so the editor owns its internal scrollbar.
-const PluginSurface = styledComponent('div', {
-    height: '100%',
-    width: '100%',
-    display: 'flex',
-    flexDirection: 'column',
-    overflow: 'hidden' as const,
-});
-
 // Footer bar — modest breathing room (8px vertical / 16px horizontal) to
 // match the FormatterDashboard footer design (cross-reference:
 // distribution/ScriptingSpaceFormatter/src/dashboards/FormatterDashboard.tsx
@@ -387,20 +377,34 @@ const DashboardShell = () => {
     // Static slots: gather sidebar slot assignments in plugin sequence order
     const sidebarNodes: { pluginId: string; node: React.ReactNode }[] = [];
     // Content hook: run every plugin's renderFile against the ACTIVE file and
-    // collect the contributions in plugin order. One contribution → direct
-    // render (no tab bar); two or more → plugin-style tabs.
+    // collect the contributions. Two or more contributions → plugin-style
+    // tabs, ORDERED by the plugins' `matches` predicates: plugins that claim
+    // the file (e.g. the json-viewer matching .json) come FIRST, the rest
+    // keep registration order after them ([Json][Editor] for a .json file,
+    // [Editor][Json] for anything else). Stable within each group — the
+    // partition preserves relative registration order on both sides.
     const activeFile =
         store.files.find((entry) => entry.name === store.activeFileId) ?? null;
     const rendered: { pluginId: string; label: string; node: React.ReactNode }[] = [];
     if (activeFile) {
+        const matched: typeof rendered = [];
+        const unmatched: typeof rendered = [];
         arrayEach(plugins, ({ value: plugin }) => {
             if (!plugin.renderFile) return;
             const node = plugin.renderFile(activeFile);
             // null / undefined → the plugin contributes nothing for this file
             if (node !== null && node !== undefined) {
-                rendered.push({ pluginId: plugin.id, label: plugin.label ?? plugin.id, node });
+                const entry = {
+                    pluginId: plugin.id,
+                    label: plugin.label ?? plugin.id,
+                    node,
+                };
+                // matches(file) === true → priority group; everything else
+                // (including plugins without a matcher) falls back
+                (plugin.matches?.(activeFile) ? matched : unmatched).push(entry);
             }
         });
+        rendered.push(...matched, ...unmatched);
     }
 
     // Active tab = the selected plugin id. Falls back to the first
@@ -445,18 +449,19 @@ const DashboardShell = () => {
                     ))}
                 </SidebarColumn>
                 <ContentPane data-testid="content-pane">
-                    {/* Nothing open (or no contributions) → placeholder. ONE
-                        contributing plugin → direct render with no tab bar.
-                        TWO OR MORE → plugin-style tabs, one tab per plugin in
-                        sequence order; only the active tab's node mounts. */}
+                    {/* Nothing open (or no contributions) → placeholder.
+                        Otherwise ALWAYS render the plugin tab bar (even with
+                        a single contributor) — the tabs indicate WHICH
+                        plugin is showing, per the dashboard contract. Only
+                        the active tab's node mounts. Tab order: matched
+                        plugins first (matches → [Json][Editor] for .json),
+                        then the rest in registration order. */}
                     {rendered.length === 0 ? (
                         <ContentPlaceholder data-testid="content-placeholder">
                             {store.files.length === 0
                                 ? 'Drop a text file anywhere to get started.'
                                 : 'No plugin rendered this file.'}
                         </ContentPlaceholder>
-                    ) : rendered.length === 1 ? (
-                        <PluginSurface>{rendered[0].node}</PluginSurface>
                     ) : (
                         <ContentTabs data-testid="content-tabs">
                             <TabBar data-testid="tab-bar">

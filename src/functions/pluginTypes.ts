@@ -36,6 +36,13 @@ export type ScribblePlugin = {
     // Return null / undefined to contribute nothing. Pure render — no side
     // effects, deterministic output for a given file.
     renderFile?: (file: ScribbleFileLike) => ReactNode | null;
+    // Extension matcher: given the ACTIVE file's name, does this plugin
+    // consider itself the BEST viewer for it? The dashboard uses this to
+    // ORDER the content tabs — plugins whose matcher returns true come FIRST
+    // (e.g. a .json file renders [Json][Editor]; anything else falls back to
+    // registration order, [Editor][Json]). Pure predicate — no side effects.
+    // Omit it for plugins that never claim priority (the generic fallbacks).
+    matches?: (file: ScribbleFileLike) => boolean;
 };
 
 // Structural subset of the session's ScribbleFile the renderFile hook

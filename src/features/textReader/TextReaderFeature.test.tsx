@@ -101,7 +101,7 @@ describe('TextReaderFeature', () => {
         // Must exist with the exact definition the dashboard executes
         expect(plugin).toEqual({
             id: 'text-reader',
-            label: 'Editor',
+            label: 'General',
             title: 'Text File Reader',
             description: undefined,
             slots: undefined,

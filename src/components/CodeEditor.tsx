@@ -1,6 +1,7 @@
 import React from 'react';
 import CodeMirror from '@uiw/react-codemirror';
 import { EditorView } from '@codemirror/view';
+import type { Extension } from '@codemirror/state';
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { tags } from '@lezer/highlight';
 import { styledComponent } from '@presource/react';
@@ -122,6 +123,11 @@ export type CodeEditorProps = {
     // Editor height. '100%' fills the parent (used by full-area sessions);
     // defaults to a fixed 320px card height.
     height?: string;
+    // Extra CodeMirror extensions (language packs, linters, custom
+    // completion sources) — appended AFTER the base extensions so language
+    // config can override the generic setup. Used by the JSON plugin to turn
+    // the generic editor into a structure-aware JSON editor.
+    extensions?: Extension[];
 };
 
 // Code editor surface for opened files, built on CodeMirror 6 via the
@@ -135,14 +141,17 @@ export type CodeEditorProps = {
 // (EditorContainer overflow: hidden clips the frame; the '100%' height prop
 // pins the editor to the container so the scroller gets a bounded box).
 // Horizontal overflow never happens — lineWrapping soft-wraps every line.
-export const CodeEditor = ({ value, onChange, testId, height }: CodeEditorProps) => (
+export const CodeEditor = ({ value, onChange, testId, height, extensions }: CodeEditorProps) => (
     <EditorContainer data-testid={testId ?? 'code-editor'}>
         <CodeMirror
             value={value}
             onChange={onChange}
             theme="none"
             height={height ?? '320px'}
-            extensions={editorExtensions}
+            // Extra extensions go LAST — later extensions win precedence
+            // conflicts in CodeMirror, so language-specific behavior
+            // (JSON grammar, linter) reliably overrides the generic setup
+            extensions={[...editorExtensions, ...(extensions ?? [])]}
             style={{ height: '100%' }}
         />
     </EditorContainer>

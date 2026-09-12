@@ -76,7 +76,7 @@ export const TextReaderFeature: React.FC = () => {
 // plugin-style tab once other plugins contribute for the same file.
 registerScribblePlugin({
     id: 'text-reader',
-    label: 'Editor',
+    label: 'General',
     title: 'Text File Reader',
     renderFile: (file) => <TextEditorSurface file={file} />,
 });

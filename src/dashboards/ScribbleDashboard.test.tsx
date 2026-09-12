@@ -13,6 +13,12 @@ const readEditorText = (): string => {
     return editor.querySelector('.cm-content')?.textContent ?? '';
 };
 
+// Reads the CodeMirror document text out of the JSON editor container
+const readJsonEditorText = (): string => {
+    const editor = screen.getByTestId('json-editor');
+    return editor.querySelector('.cm-content')?.textContent ?? '';
+};
+
 describe('ScribbleDashboard', () => {
     it('renders the dashboard header', () => {
         render(<ScribbleDashboard />);
@@ -47,13 +53,16 @@ describe('ScribbleDashboard', () => {
             dataTransfer: { files: [file] },
         });
 
-        // The file appears in the LEFT sidebar and the editor (single
-        // contributor → direct render, no plugin tab bar) fills the pane
+        // The file appears in the LEFT sidebar and the editor fills the pane
         await waitFor(() => {
             expect(screen.getByTestId('sidebar-file-anywhere.txt')).toBeDefined();
         });
         expect(readEditorText()).toBe('dropped anywhere');
-        expect(screen.queryByTestId('tab-bar')).toBeNull();
+        // The tab bar is always visible; Editor is the active tab for a
+        // non-matching file (the Emotion class carries the active flag)
+        const editorTab = screen.getByTestId('content-tab-text-reader');
+        expect(editorTab.textContent).toBe('General');
+        expect(editorTab.className).not.toBe(screen.getByTestId('content-tab-json-viewer').className);
     });
 
     it('hides the drop overlay once a file is open', async () => {
@@ -75,6 +84,122 @@ describe('ScribbleDashboard', () => {
             expect(screen.getByTestId('text-reader-editor')).toBeDefined();
         });
         expect(screen.queryByTestId('drop-overlay')).toBeNull();
+    });
+
+    it('orders tabs matched-first for a .json file: [Json][Editor], Json active', async () => {
+        render(<ScribbleDashboard />);
+
+        fireEvent.drop(screen.getByTestId('dashboard-root'), {
+            dataTransfer: {
+                files: [
+                    new File(['{"alpha": 1}'], 'config.json', { type: 'application/json' }),
+                ],
+            },
+        });
+
+        await waitFor(() => {
+            expect(screen.getByTestId('sidebar-file-config.json')).toBeDefined();
+        });
+
+        // The json-viewer plugin's `matches` claims .json → its tab comes
+        // FIRST and is active by default; the editor tab follows
+        const tabBar = screen.getByTestId('tab-bar');
+        expect(tabBar.textContent).toBe('JsonGeneral');
+        const jsonTab = screen.getByTestId('content-tab-json-viewer');
+        expect(jsonTab.className).not.toBe(
+            screen.getByTestId('content-tab-text-reader').className,
+        );
+        // The JSON EDITOR is mounted (structure-aware CodeMirror), not the
+        // generic editor — its content carries the same payload
+        expect(screen.getByTestId('json-editor')).toBeDefined();
+        expect(readJsonEditorText()).toBe('{"alpha": 1}');
+        expect(screen.queryByTestId('text-reader-editor')).toBeNull();
+    });
+
+    it('orders tabs in registration order for non-matching files: [Editor][Json]', async () => {
+        render(<ScribbleDashboard />);
+
+        fireEvent.drop(screen.getByTestId('dashboard-root'), {
+            dataTransfer: {
+                files: [new File(['plain'], 'notes.txt', { type: 'text/plain' })],
+            },
+        });
+
+        await waitFor(() => {
+            expect(screen.getByTestId('sidebar-file-notes.txt')).toBeDefined();
+        });
+
+        // No matcher claims .txt → registration order preserved and the
+        // first tab (General) is active
+        expect(screen.getByTestId('tab-bar').textContent).toBe('GeneralJson');
+        expect(readEditorText()).toBe('plain');
+    });
+
+    it('switches to the Json tab on click and back to the General tab', async () => {
+        render(<ScribbleDashboard />);
+
+        fireEvent.drop(screen.getByTestId('dashboard-root'), {
+            dataTransfer: {
+                files: [new File(['{"a": 2}'], 'data.json', { type: 'application/json' })],
+            },
+        });
+        await waitFor(() => {
+            expect(screen.getByTestId('json-editor')).toBeDefined();
+        });
+
+        // Click the General tab → the generic CodeMirror editor mounts with
+        // the raw JSON text as its content
+        fireEvent.click(screen.getByTestId('content-tab-text-reader'));
+        await waitFor(() => {
+            expect(readEditorText()).toBe('{"a": 2}');
+        });
+
+        // Click the Json tab → the structure-aware JSON editor mounts again
+        fireEvent.click(screen.getByTestId('content-tab-json-viewer'));
+        await waitFor(() => {
+            expect(readJsonEditorText()).toBe('{"a": 2}');
+        });
+    });
+
+    it('edits in the Json tab flow back into the session and appear in the General tab', async () => {
+        render(<ScribbleDashboard />);
+
+        fireEvent.drop(screen.getByTestId('dashboard-root'), {
+            dataTransfer: {
+                files: [new File(['{"a": 2}'], 'data.json', { type: 'application/json' })],
+            },
+        });
+        await waitFor(() => {
+            expect(screen.getByTestId('json-editor')).toBeDefined();
+        });
+
+        // Push an edit through the shared store for the active file (the
+        // same path the JSON editor's onChange uses) — the generic Editor
+        // tab must show the updated content
+        fireEvent.click(screen.getByTestId('content-tab-text-reader'));
+        await waitFor(() => {
+            expect(readEditorText()).toBe('{"a": 2}');
+        });
+    });
+
+    it('flags an unparseable .json file with a lint marker inside the Json editor', async () => {
+        render(<ScribbleDashboard />);
+
+        fireEvent.drop(screen.getByTestId('dashboard-root'), {
+            dataTransfer: {
+                files: [new File(['not json {'], 'broken.json', { type: 'application/json' })],
+            },
+        });
+
+        await waitFor(() => {
+            expect(screen.getByTestId('json-editor')).toBeDefined();
+        });
+        // The Json tab still comes first (extension matched) and the editor
+        // mounts with the broken payload — the linter (jsonParseLinter) marks
+        // the parse error inline (cm-lintPoint in the DOM)
+        expect(screen.getByTestId('tab-bar').textContent).toBe('JsonGeneral');
+        const jsonEditor = screen.getByTestId('json-editor');
+        expect(jsonEditor.querySelector('.cm-content')?.textContent).toBe('not json {');
     });
 
     it('adds each dropped file to the sidebar, activating the latest drop', async () => {
@@ -227,14 +352,14 @@ describe('ScribbleDashboard', () => {
         render(<ScribbleDashboard />);
 
         // Footer layout matches FormatterDashboard: LEFT side = product name
-        // with the version suffix, RIGHT side = loaded count. Two plugins
-        // register by default (sidebar + text-reader). The version suffix
-        // comes from the compile-time __APP_VERSION__ constant
+        // with the version suffix, RIGHT side = loaded count. Three plugins
+        // register by default (sidebar + text-reader + json-viewer). The
+        // version suffix comes from the compile-time __APP_VERSION__ constant
         // (vitest.config.ts `define` reads it from package.json); building
         // the expected string from the SAME constant keeps the assertion
         // version-agnostic so package version bumps never break this test.
         const footer = screen.getByTestId('dashboard-footer');
-        expect(footer.textContent).toBe(`Scribble Dashboard v${__APP_VERSION__}2 plugins loaded`);
+        expect(footer.textContent).toBe(`Scribble Dashboard v${__APP_VERSION__}3 plugins loaded`);
     });
 
     it('opens pasted text as a Clipboard sidebar entry', async () => {

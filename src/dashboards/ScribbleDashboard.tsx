@@ -1,6 +1,10 @@
 import React from 'react';
 import { arrayEach } from '@presource/core';
-import { styledComponent, useStateHook } from '@presource/react';
+import {
+    styledComponent,
+    useStateHook,
+    useReferenceHook,
+} from '@presource/react';
 import {
     getScribblePlugins,
     readTextFile,
@@ -195,6 +199,81 @@ const TabPanel = styledComponent('div', {
     overflow: 'hidden' as const,
 });
 
+// ─── Tab overflow ([…] dropdown) ─────────────────────────────────────────────
+// With hundreds of possible content plugins, the tab bar shows only the
+// FIRST 10 tabs; everything beyond folds into a "[…]" overflow button that
+// opens a dropdown listing the remaining tabs.
+
+// MAX_VISIBLE_TABS — how many tabs render directly in the bar before the
+// overflow kicks in
+const MAX_VISIBLE_TABS = 10;
+
+// Wrapper anchoring the overflow dropdown (position: relative)
+const TabOverflowArea = styledComponent('div', {
+    position: 'relative' as const,
+    flexShrink: 0,
+    display: 'flex',
+});
+
+// The "[…]" trigger — same visual family as TabButton but always muted
+const TabOverflowButton = styledComponent<{ open: boolean }>(
+    'button',
+    {
+        padding: '6px 10px',
+        fontSize: 12,
+        fontWeight: 600,
+        fontFamily: 'inherit',
+        borderRadius: '8px 8px 0 0',
+        border: `1px solid ${PALETTE_BORDER}`,
+        borderBottom: 'none' as const,
+        background: ({ open }) => (open ? PALETTE_BACKGROUND : 'transparent'),
+        color: ({ open }) => (open ? PALETTE_TEXT_BRIGHT : PALETTE_TEXT_MUTED),
+        cursor: 'pointer',
+        borderTop: ({ open }) => (open ? `2px solid ${PALETTE_ACCENT}` : '2px solid transparent'),
+    },
+    // Standard button attributes passthrough — same cast pattern as TabButton
+) as unknown as React.FC<
+    { open: boolean } & React.ButtonHTMLAttributes<HTMLButtonElement>
+>;
+
+// Dropdown panel — absolutely positioned under the trigger, right-aligned so
+// it never overflows the tab bar's right edge
+const TabOverflowPanel = styledComponent('div', {
+    position: 'absolute' as const,
+    top: 'calc(100% + 6px)',
+    right: 0,
+    minWidth: 180,
+    maxHeight: 320,
+    overflowY: 'auto' as const,
+    background: PALETTE_SURFACE,
+    border: `1px solid ${PALETTE_BORDER}`,
+    borderRadius: 8,
+    boxShadow: '0 12px 32px rgba(0, 0, 0, 0.45)',
+    padding: 6,
+    display: 'flex',
+    flexDirection: 'column' as const,
+    gap: 2,
+    zIndex: 20,
+});
+
+// One dropdown row — full-width clickable strip; hover raised via a `hovered`
+// prop (styledComponent has no nested-selector support — same pattern as the
+// Formatter's HeaderMenuRow)
+const TabOverflowRow = styledComponent<{ hovered: boolean; active: boolean }>('div', {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    padding: '8px 10px',
+    fontSize: 13,
+    borderRadius: 6,
+    cursor: 'pointer',
+    userSelect: 'none' as const,
+    color: ({ active, hovered }) =>
+        active ? PALETTE_TEXT_BRIGHT : hovered ? PALETTE_TEXT_BODY : PALETTE_TEXT_MUTED,
+    background: ({ active, hovered }) =>
+        active ? PALETTE_SURFACE_HOVER : hovered ? PALETTE_BORDER : 'transparent',
+});
+
 // Footer bar — modest breathing room (8px vertical / 16px horizontal) to
 // match the FormatterDashboard footer design (cross-reference:
 // distribution/ScriptingSpaceFormatter/src/dashboards/FormatterDashboard.tsx
@@ -238,6 +317,105 @@ const DropOverlay = styledComponent<{ active: boolean }>('div', {
     color: PALETTE_ACCENT_BRIGHT,
     pointerEvents: 'none' as const,
 });
+
+// ─── Tab overflow component ──────────────────────────────────────────────────
+
+type OverflowTab = { pluginId: string; label: string };
+
+// The "[…]" overflow: lists the tabs that did not fit in the direct bar.
+// Outside-click dismiss (document-level mousedown, armed only while open —
+// same pattern as the Formatter's HeaderMenu). Rows carry per-row hover
+// state; the currently ACTIVE tab is highlighted inside the dropdown.
+const TabOverflow = ({
+    tabs,
+    activeId,
+    onSelect,
+}: {
+    tabs: OverflowTab[];
+    activeId: string | null;
+    onSelect: (pluginId: string) => void;
+}) => {
+    // Open state of the dropdown panel
+    const open = useStateHook(false);
+    // Ref for the outside-click dismiss
+    const areaRef = useReferenceHook<HTMLDivElement | null>(null);
+    const AreaWithRef = TabOverflowArea as unknown as React.FC<
+        React.HTMLAttributes<HTMLDivElement> & { ref?: React.Ref<HTMLDivElement> }
+    >;
+    React.useEffect(() => {
+        if (!open()) return;
+        const handlePointerDown = (event: MouseEvent) => {
+            const area = areaRef();
+            // Click inside the trigger/panel → leave the menu alone
+            if (area && area.contains(event.target as Node)) return;
+            open(false);
+        };
+        document.addEventListener('mousedown', handlePointerDown);
+        return () => document.removeEventListener('mousedown', handlePointerDown);
+    }, [open()]);
+
+    return (
+        <AreaWithRef ref={areaRef} data-testid="tab-overflow">
+            <TabOverflowButton
+                type="button"
+                open={open()}
+                aria-haspopup="menu"
+                aria-expanded={open()}
+                aria-label="More viewers"
+                onClick={() => open(!open())}
+                data-testid="tab-overflow-button"
+            >
+                […]
+            </TabOverflowButton>
+            {/* Panel mounts ONLY while open */}
+            {open() ? (
+                <TabOverflowPanel role="menu" data-testid="tab-overflow-panel">
+                    {tabs.map((tab) => (
+                        <OverflowRow
+                            key={tab.pluginId}
+                            tab={tab}
+                            active={tab.pluginId === activeId}
+                            onSelect={() => {
+                                onSelect(tab.pluginId);
+                                open(false);
+                            }}
+                        />
+                    ))}
+                </TabOverflowPanel>
+            ) : null}
+        </AreaWithRef>
+    );
+};
+
+// One dropdown row with its own hover tracking — isolated per row so
+// hovering one row does not re-render the whole menu
+const OverflowRow = ({
+    tab,
+    active,
+    onSelect,
+}: {
+    tab: OverflowTab;
+    active: boolean;
+    onSelect: () => void;
+}) => {
+    const hovered = useStateHook(false);
+    const Row = TabOverflowRow as unknown as React.FC<
+        { hovered: boolean; active: boolean } & React.HTMLAttributes<HTMLDivElement>
+    >;
+    return (
+        <Row
+            hovered={hovered()}
+            active={active}
+            role="menuitem"
+            onMouseOver={() => hovered(true)}
+            onMouseOut={() => hovered(false)}
+            onClick={onSelect}
+            data-testid={`tab-overflow-item-${tab.pluginId}`}
+        >
+            {tab.label}
+        </Row>
+    );
+};
 
 // ─── Dashboard composition ───────────────────────────────────────────────────
 
@@ -359,7 +537,7 @@ const DashboardShell = () => {
             //    payload); a text-only paste leaves the Clipboard entry
             //    focused.
             if (text !== '') {
-                store.openFile({ name: 'Clipboard', content: text });
+                store.openFile({ name: 'Clipboard', content: text, kind: 'text' as const, mime: 'text/plain' });
             }
             // 2. File payloads → identical pipeline to a drop (read + open).
             //    Promise.all keeps the open order deterministic.
@@ -454,8 +632,10 @@ const DashboardShell = () => {
                         a single contributor) — the tabs indicate WHICH
                         plugin is showing, per the dashboard contract. Only
                         the active tab's node mounts. Tab order: matched
-                        plugins first (matches → [Json][Editor] for .json),
-                        then the rest in registration order. */}
+                        plugins first (matches → [Json][General] for .json),
+                        then the rest in registration order. With more than
+                        MAX_VISIBLE_TABS contributions the bar folds the tail
+                        into the […] overflow dropdown. */}
                     {rendered.length === 0 ? (
                         <ContentPlaceholder data-testid="content-placeholder">
                             {store.files.length === 0
@@ -465,17 +645,28 @@ const DashboardShell = () => {
                     ) : (
                         <ContentTabs data-testid="content-tabs">
                             <TabBar data-testid="tab-bar">
-                                {rendered.map(({ pluginId, label }) => (
-                                    <TabButton
-                                        key={pluginId}
-                                        type="button"
-                                        active={pluginId === visibleId}
-                                        onClick={() => selectedTab(pluginId)}
-                                        data-testid={`content-tab-${pluginId}`}
-                                    >
-                                        {label}
-                                    </TabButton>
-                                ))}
+                                {/* Direct tabs: first MAX_VISIBLE_TABS only */}
+                                {rendered
+                                    .slice(0, MAX_VISIBLE_TABS)
+                                    .map(({ pluginId, label }) => (
+                                        <TabButton
+                                            key={pluginId}
+                                            type="button"
+                                            active={pluginId === visibleId}
+                                            onClick={() => selectedTab(pluginId)}
+                                            data-testid={`content-tab-${pluginId}`}
+                                        >
+                                            {label}
+                                        </TabButton>
+                                    ))}
+                                {/* Tail beyond MAX_VISIBLE_TABS → […] dropdown */}
+                                {rendered.length > MAX_VISIBLE_TABS ? (
+                                    <TabOverflow
+                                        tabs={rendered.slice(MAX_VISIBLE_TABS)}
+                                        activeId={visibleId}
+                                        onSelect={(id) => selectedTab(id)}
+                                    />
+                                ) : null}
                             </TabBar>
                             {/* Only the active plugin's node is mounted */}
                             <TabPanel data-testid={`content-tab-panel-${visibleId}`}>

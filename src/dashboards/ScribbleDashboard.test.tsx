@@ -102,9 +102,12 @@ describe('ScribbleDashboard', () => {
         });
 
         // The json-viewer plugin's `matches` claims .json → its tab comes
-        // FIRST and is active by default; the editor tab follows
+        // FIRST and is active by default. Only plugins whose renderFile
+        // returns a node get tabs: OpenAPI (content gate), Image and Pdf
+        // (kind gate) contribute nothing for a .json file, so the bar is
+        // [Json][General][Markdown][Yaml]
         const tabBar = screen.getByTestId('tab-bar');
-        expect(tabBar.textContent).toBe('JsonGeneral');
+        expect(tabBar.textContent).toBe('JsonGeneralMarkdownYaml');
         const jsonTab = screen.getByTestId('content-tab-json-viewer');
         expect(jsonTab.className).not.toBe(
             screen.getByTestId('content-tab-text-reader').className,
@@ -129,9 +132,11 @@ describe('ScribbleDashboard', () => {
             expect(screen.getByTestId('sidebar-file-notes.txt')).toBeDefined();
         });
 
-        // No matcher claims .txt → registration order preserved and the
-        // first tab (General) is active
-        expect(screen.getByTestId('tab-bar').textContent).toBe('GeneralJson');
+        // No matcher claims .txt (markdown/yaml match by extension only) →
+        // registration order preserved and the first tab (General) is active.
+        // OpenAPI/Image/Pdf contribute nothing for a .txt file, so the bar is
+        // [General][Json][Markdown][Yaml]
+        expect(screen.getByTestId('tab-bar').textContent).toBe('GeneralJsonMarkdownYaml');
         expect(readEditorText()).toBe('plain');
     });
 
@@ -197,7 +202,7 @@ describe('ScribbleDashboard', () => {
         // The Json tab still comes first (extension matched) and the editor
         // mounts with the broken payload — the linter (jsonParseLinter) marks
         // the parse error inline (cm-lintPoint in the DOM)
-        expect(screen.getByTestId('tab-bar').textContent).toBe('JsonGeneral');
+        expect(screen.getByTestId('tab-bar').textContent).toBe('JsonGeneralMarkdownYaml');
         const jsonEditor = screen.getByTestId('json-editor');
         expect(jsonEditor.querySelector('.cm-content')?.textContent).toBe('not json {');
     });
@@ -352,14 +357,15 @@ describe('ScribbleDashboard', () => {
         render(<ScribbleDashboard />);
 
         // Footer layout matches FormatterDashboard: LEFT side = product name
-        // with the version suffix, RIGHT side = loaded count. Three plugins
-        // register by default (sidebar + text-reader + json-viewer). The
-        // version suffix comes from the compile-time __APP_VERSION__ constant
-        // (vitest.config.ts `define` reads it from package.json); building
-        // the expected string from the SAME constant keeps the assertion
-        // version-agnostic so package version bumps never break this test.
+        // with the version suffix, RIGHT side = loaded count. EIGHT plugins
+        // register by default (sidebar, general editor, json, markdown,
+        // yaml, openapi, image, pdf). The version suffix comes from the
+        // compile-time __APP_VERSION__ constant (vitest.config.ts `define`
+        // reads it from package.json); building the expected string from the
+        // SAME constant keeps the assertion version-agnostic so package
+        // version bumps never break this test.
         const footer = screen.getByTestId('dashboard-footer');
-        expect(footer.textContent).toBe(`Scribble Dashboard v${__APP_VERSION__}3 plugins loaded`);
+        expect(footer.textContent).toBe(`Scribble Dashboard v${__APP_VERSION__}8 plugins loaded`);
     });
 
     it('opens pasted text as a Clipboard sidebar entry', async () => {

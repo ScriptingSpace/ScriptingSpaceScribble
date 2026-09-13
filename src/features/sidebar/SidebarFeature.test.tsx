@@ -15,8 +15,8 @@ describe('FileSidebar', () => {
         render(
             <FileSidebar
                 files={[
-                    { name: 'a.txt', content: 'a' },
-                    { name: 'b.txt', content: 'b' },
+                    { name: 'a.txt', content: 'a', kind: 'text' as const, mime: '' },
+                    { name: 'b.txt', content: 'b', kind: 'text' as const, mime: '' },
                 ]}
                 activeFileId="a.txt"
                 onSelect={() => {}}
@@ -43,8 +43,8 @@ describe('FileSidebar', () => {
         render(
             <FileSidebar
                 files={[
-                    { name: 'a.txt', content: 'a' },
-                    { name: 'b.txt', content: 'b' },
+                    { name: 'a.txt', content: 'a', kind: 'text' as const, mime: '' },
+                    { name: 'b.txt', content: 'b', kind: 'text' as const, mime: '' },
                 ]}
                 activeFileId="b.txt"
                 onSelect={() => {}}
@@ -63,7 +63,7 @@ describe('FileSidebar', () => {
         const closed: string[] = [];
         render(
             <FileSidebar
-                files={[{ name: 'a.txt', content: 'a' }]}
+                files={[{ name: 'a.txt', content: 'a', kind: 'text' as const, mime: '' }]}
                 activeFileId={null}
                 onSelect={(name) => selected.push(name)}
                 onClose={(name) => closed.push(name)}
@@ -81,7 +81,7 @@ describe('FileSidebar', () => {
         const closed: string[] = [];
         render(
             <FileSidebar
-                files={[{ name: 'a.txt', content: 'a' }]}
+                files={[{ name: 'a.txt', content: 'a', kind: 'text' as const, mime: '' }]}
                 activeFileId="a.txt"
                 onSelect={(name) => selected.push(name)}
                 onClose={(name) => closed.push(name)}
@@ -98,7 +98,7 @@ describe('FileSidebar', () => {
         const selected: string[] = [];
         render(
             <FileSidebar
-                files={[{ name: 'a.txt', content: 'a' }]}
+                files={[{ name: 'a.txt', content: 'a', kind: 'text' as const, mime: '' }]}
                 activeFileId={null}
                 onSelect={(name) => selected.push(name)}
                 onClose={() => {}}
@@ -148,12 +148,12 @@ describe('ConnectedFileSidebar', () => {
                 <button
                     type="button"
                     data-testid="drop-a"
-                    onClick={() => session.openFile({ name: 'a.txt', content: 'aaa' })}
+                    onClick={() => session.openFile({ name: 'a.txt', content: 'aaa', kind: 'text' as const, mime: 'text/plain' })}
                 />
                 <button
                     type="button"
                     data-testid="drop-b"
-                    onClick={() => session.openFile({ name: 'b.txt', content: 'bbb' })}
+                    onClick={() => session.openFile({ name: 'b.txt', content: 'bbb', kind: 'text' as const, mime: 'text/plain' })}
                 />
             </ScribbleFileProvider>
         );

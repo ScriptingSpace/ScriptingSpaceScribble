@@ -47,10 +47,18 @@ export type ScribblePlugin = {
 
 // Structural subset of the session's ScribbleFile the renderFile hook
 // receives — declared here (instead of importing from fileStore) to keep
-// the plugin contract dependency-light and cycle-free.
+// the plugin contract dependency-light and cycle-free. `kind`/`mime` mirror
+// the full ScribbleFile (cross-reference: ./fileStore.ts) — OPTIONAL so the
+// type stays a structural subset (older call sites constructing bare
+// {name, content} objects keep compiling), while media-aware plugins (e.g.
+// features/imageViewer) can still branch on the render classification the
+// dashboard always supplies (ScribbleDashboard.tsx passes the full
+// ScribbleFile into renderFile/matches).
 export type ScribbleFileLike = {
     name: string;
     content: string;
+    kind?: string;
+    mime?: string;
 };
 
 // Legacy component slot — a plugin that only ships a Component renders as a

@@ -11,11 +11,14 @@ afterEach(() => {
 });
 
 describe('readTextFile', () => {
-    it('resolves with the file name and plain text content', async () => {
+    it('resolves with the file name, kind, mime and plain text content', async () => {
         const file = new File(['hello scribble'], 'notes.txt', { type: 'text/plain' });
 
+        // Text files read as decoded text with the detected kind + MIME
         await expect(readTextFile(file)).resolves.toEqual({
             name: 'notes.txt',
+            kind: 'text',
+            mime: 'text/plain',
             content: 'hello scribble',
         });
     });
@@ -27,8 +30,44 @@ describe('readTextFile', () => {
 
         await expect(readTextFile(file)).resolves.toEqual({
             name: 'multi.txt',
+            kind: 'text',
+            mime: 'text/plain',
             content: 'line one\nline two\n\nline four',
         });
+    });
+
+    it('reads image files as data URLs with kind image', async () => {
+        // 1×1 transparent PNG — readAsDataURL produces a data URL
+        const file = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'dot.png', {
+            type: 'image/png',
+        });
+
+        const opened = await readTextFile(file);
+        expect(opened.kind).toBe('image');
+        expect(opened.mime).toBe('image/png');
+        expect(opened.content.startsWith('data:image/png;base64,')).toBe(true);
+    });
+
+    it('classifies pdf files by MIME and reads them as data URLs', async () => {
+        const file = new File(['%PDF-1.4 fake'], 'doc.pdf', { type: 'application/pdf' });
+
+        const opened = await readTextFile(file);
+        expect(opened.kind).toBe('pdf');
+        expect(opened.mime).toBe('application/pdf');
+        expect(opened.content.startsWith('data:application/pdf;base64,')).toBe(true);
+    });
+
+    it('classifies pdf by extension when the MIME is empty', async () => {
+        const file = new File(['%PDF-1.4 fake'], 'doc.pdf', { type: '' });
+
+        expect(readTextFile(file)).resolves.toMatchObject({ kind: 'pdf' });
+    });
+
+    it('downgrades NUL-byte payloads to binary kind', async () => {
+        // Empty MIME + unknown extension + NUL byte → binary (sniff catch)
+        const file = new File(['MZ\u0000binary'], 'app.unknownext', { type: '' });
+
+        await expect(readTextFile(file)).resolves.toMatchObject({ kind: 'binary' });
     });
 });
 
@@ -56,17 +95,17 @@ describe('fileStore', () => {
                 <button
                     type="button"
                     data-testid="open-a"
-                    onClick={() => store.openFile({ name: 'a.txt', content: 'aaa' })}
+                    onClick={() => store.openFile({ name: 'a.txt', content: 'aaa', kind: 'text' as const, mime: 'text/plain' })}
                 />
                 <button
                     type="button"
                     data-testid="open-b"
-                    onClick={() => store.openFile({ name: 'b.txt', content: 'bbb' })}
+                    onClick={() => store.openFile({ name: 'b.txt', content: 'bbb', kind: 'text' as const, mime: 'text/plain' })}
                 />
                 <button
                     type="button"
                     data-testid="open-a-again"
-                    onClick={() => store.openFile({ name: 'a.txt', content: 'a2' })}
+                    onClick={() => store.openFile({ name: 'a.txt', content: 'a2', kind: 'text' as const, mime: 'text/plain' })}
                 />
                 <button
                     type="button"

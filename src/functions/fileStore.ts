@@ -1,10 +1,27 @@
 import { localContextStore } from '@presource/react';
 
+// Render classification for an accepted file — decides HOW plugins treat it:
+// - 'image'  → rendered in an <img> (content is a data URL)
+// - 'pdf'    → rendered by the PDF viewer plugin (content is a data URL)
+// - 'text'   → rendered as text / code (content is decoded text)
+// - 'binary' → NOT rendered; a notice is shown instead
+export type ScribbleFileKind = 'image' | 'pdf' | 'text' | 'binary';
+
 // A file opened on the dashboard. `name` doubles as the stable id: opening a
 // file whose name matches an existing entry replaces that entry's content
-// (re-load); a new name appends a new entry.
+// (re-load); a new name appends a new entry. `kind`/`mime` are detected by
+// readTextFile (src/functions/readTextFile.ts) from the browser File's MIME
+// type / extension (with a NUL-byte sniff fallback) — mirroring the
+// Formatter's file model (cross-reference:
+// distribution/ScriptingSpaceFormatter/src/functions/fileStore.ts).
 export type ScribbleFile = {
     name: string;
+    kind: ScribbleFileKind;
+    // Original MIME type as reported by the browser (may be ''); used as the
+    // <img> fallback source type
+    mime: string;
+    // image/pdf → data URL; text → decoded text; binary → raw text dump
+    // (never rendered, kept for future features)
     content: string;
 };
 
@@ -29,7 +46,7 @@ export type ScribbleFileContext = {
 };
 
 // Cross-reference: ScribbleDashboard.tsx wraps the tree in the provider and
-// owns the state; the sidebar feature and the text-reader plugin consume it.
+// owns the state; the sidebar feature and the content plugins consume it.
 export const {
     ContextProvider: ScribbleFileProvider,
     contextStore: scribbleFileStore,

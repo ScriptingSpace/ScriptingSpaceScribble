@@ -73,12 +73,12 @@ const Harness = ({ children }: { children: React.ReactNode }) => {
             <button
                 type="button"
                 data-testid="drop-a"
-                onClick={() => session.openFile({ name: 'a.txt', content: 'content a' })}
+                onClick={() => session.openFile({ name: 'a.txt', content: 'content a', kind: 'text' as const, mime: 'text/plain' })}
             />
             <button
                 type="button"
                 data-testid="drop-b"
-                onClick={() => session.openFile({ name: 'b.txt', content: 'content b' })}
+                onClick={() => session.openFile({ name: 'b.txt', content: 'content b', kind: 'text' as const, mime: 'text/plain' })}
             />
             <StoreEditButton />
         </ScribbleFileProvider>

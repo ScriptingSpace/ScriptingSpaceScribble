@@ -10,6 +10,14 @@ import {
     readTextFile,
     scribbleFileStore,
     ScribbleFileProvider,
+    // Settings store — configuration state + JSON (de)serialization helpers
+    // (see functions/settingsStore.ts). The settings screen (toggled by the
+    // footer version button) reads/writes configuration through this store;
+    // the configuration JSON panel round-trips it through parse/serialize.
+    createDefaultScribbleSettings,
+    parseScribbleSettings,
+    scribbleSettingsStore,
+    ScribbleSettingsProvider,
     // Palette tokens — Flexoki-dark-based warm scheme (see functions/palette.ts
     // for the full rationale + contrast table). Imported as a namespace so
     // each styled rule reads `palette.X` instead of loose magic hex strings.
@@ -28,10 +36,17 @@ import {
     PALETTE_TEXT_MUTED,
     PALETTE_WELL,
 } from '../functions';
-import type { ScribbleFile } from '../functions';
+import type { ScribbleFile, ScribbleSettings } from '../functions';
 // Side-effect import: the features barrel self-registers every plugin
 // (see src/features/index.ts and src/functions/pluginRegistry.ts)
 import '../features';
+// Side-effect import: the settings feature self-registers as a plugin
+// (see src/features/settings/SettingsFeature.tsx). It owns the "Setting"
+// sidebar entry, the plugins on/off list and the configuration JSON panel.
+import '../features/settings';
+// Settings screen components — the configuration surface rendered while the
+// settings mode is active (sidebar entry list + plugins on/off + JSON panel).
+import { SettingsScreen, SettingsSidebar } from '../features/settings';
 
 // ─── Styled shell ────────────────────────────────────────────────────────────
 
@@ -293,6 +308,30 @@ const FooterInner = styledComponent('div', {
     color: PALETTE_TEXT_MUTED,
 });
 
+// The footer version text is a BUTTON: clicking it toggles the settings
+// screen (the user asked for "Scribble Dashboard v1.x.x on the bottom right
+// should change the screen to configuration/setting format"). Styled as
+// plain muted text so the footer's visual identity is unchanged, but it is
+// keyboard-focusable + announced as a toggle (aria-pressed) so the
+// affordance is discoverable. The `active` prop tints the text with the
+// blue accent while the settings screen is open — the only visible cue that
+// the button is armed.
+const FooterVersionButton = styledComponent<{ active: boolean }>(
+    'button',
+    {
+        padding: 0,
+        margin: 0,
+        border: 'none',
+        background: 'transparent',
+        font: 'inherit',
+        color: ({ active }) => (active ? PALETTE_ACCENT : PALETTE_TEXT_MUTED),
+        cursor: 'pointer',
+    },
+    // Standard button attributes passthrough — same cast pattern as TabButton
+) as unknown as React.FC<
+    { active: boolean } & React.ButtonHTMLAttributes<HTMLButtonElement>
+>;
+
 // Dashed drop overlay covering ONLY the content area (absolute inside
 // ContentArea — not the viewport), inset 12px. It appears ONLY while a drag
 // is in progress (accent border + scrim + label) as live drop feedback —
@@ -422,12 +461,36 @@ const OverflowRow = ({
 // Top-level wrapper: owns the multi-file session state and shares it with all
 // plugins through the ScribbleFileProvider context (src/functions/fileStore.ts).
 // Each dropped/pasted file becomes its own sidebar entry; a re-drop of the
-// same file name replaces that entry's content.
+// same file name replaces that entry's content. It ALSO owns the settings
+// state and shares it through the ScribbleSettingsProvider context
+// (src/functions/settingsStore.ts) — the settings screen (footer-button
+// toggle) reads/writes configuration through it, and applySettings triggers
+// the full-UI refresh (settingsRevision bump → DashboardShell remount).
 export const ScribbleDashboard = React.memo(() => {
     // All open files, in sidebar order
     const files = useStateHook<ScribbleFile[]>([]);
     // Currently selected entry (a file name), null when nothing is open
     const activeFileId = useStateHook<string | null>(null);
+
+    // ── Settings state ──
+    // Registered plugin snapshot — the settings' plugin keys are always
+    // materialized from this list so the Plugins on/off list and the JSON
+    // never drift from the registry (unknown ids in a pasted JSON are
+    // dropped by sanitizeScribbleSettings)
+    const pluginIds = getScribblePlugins().map((plugin) => plugin.id);
+    // Current configuration — seeded with every plugin ENABLED
+    const settings = useStateHook<ScribbleSettings>(createDefaultScribbleSettings(pluginIds));
+    // Revision counter — bumped on every applySettings so the shell's
+    // `key` changes and React remounts the ENTIRE dashboard UI (the
+    // "refresh the entire UI" contract: editors, tabs, sidebar all rebuild
+    // from the new configuration)
+    const settingsRevision = useStateHook<number>(0);
+    // SETTINGS MODE — lifted here (ABOVE the shell key) so the mode survives
+    // the apply-triggered remount: clicking Apply refreshes the UI but the
+    // user stays on the settings screen (the status line stays visible).
+    // The footer version button flips it on; the sidebar's "← Back to
+    // Files" entry flips it off.
+    const settingsMode = useStateHook<boolean>(false);
 
     // Real session implementation injected into the plugin-facing context.
     // Every mutation re-creates the array/object so subscribers see updates.
@@ -459,20 +522,77 @@ export const ScribbleDashboard = React.memo(() => {
         },
     };
 
+    // Real settings implementation injected into the plugin-facing context.
+    const settingsSession = {
+        settings: settings(),
+        // Flip one plugin on/off — re-creates the plugins map so subscribers
+        // (the settings screen) re-render with the new state
+        setPluginEnabled: (pluginId: string, enabled: boolean) => {
+            settings({
+                ...settings(),
+                plugins: {
+                    ...settings().plugins,
+                    [pluginId]: { enabled },
+                },
+            });
+        },
+        // Replace the WHOLE configuration + bump the revision — the shell
+        // key change remounts the entire UI (full refresh)
+        applySettings: (next: ScribbleSettings) => {
+            settings(next);
+            settingsRevision(settingsRevision() + 1);
+        },
+    };
+
     return (
-        <ScribbleFileProvider data={session}>
-            <DashboardShell />
-        </ScribbleFileProvider>
+        <ScribbleSettingsProvider data={settingsSession}>
+            <ScribbleFileProvider data={session}>
+                {/* key = revision lives on the WORKSPACE branch inside the
+                    shell (not on the shell itself): every settings apply
+                    remounts the workspace (fresh editors/tabs/sidebar),
+                    while the shell + settings screen stay mounted so the
+                    settings + file state and the apply status line all
+                    survive. settingsMode + its toggle are passed down —
+                    the mode is wrapper-owned state. */}
+                <DashboardShell
+                    settingsMode={settingsMode()}
+                    onToggleSettings={settingsMode}
+                    settingsRevision={settingsRevision()}
+                />
+            </ScribbleFileProvider>
+        </ScribbleSettingsProvider>
     );
 });
 
 // Shell: renders header + (left sidebar slot area / right content pane with
 // plugin-style tabs) + footer, and handles drag & drop + paste anywhere on
 // the screen (handlers live on the full-viewport root element / document).
-const DashboardShell = () => {
+// PROPS: settingsMode + onToggleSettings are OWNED by the top-level
+// ScribbleDashboard wrapper (NOT this shell) — applySettings bumps the
+// revision which remounts the shell via its `key`, and the mode must
+// SURVIVE that remount: otherwise clicking Apply would silently kick the
+// user back to the workspace and the "Settings applied — UI refreshed."
+// status would never be seen (the exact bug the apply test caught).
+const DashboardShell = ({
+    settingsMode,
+    onToggleSettings,
+    settingsRevision,
+}: {
+    settingsMode: boolean;
+    onToggleSettings: (value: boolean) => void;
+    settingsRevision: number;
+}) => {
     // Local visual state — kept here (below the provider) so drag hover
     // doesn't churn the shared file context
     const dragOver = useStateHook(false);
+    // SETTINGS MODE — when true the whole screen swaps to the configuration
+    // format: the sidebar shows the "Setting" entry + plugins on/off list,
+    // the pane shows the configuration JSON panel. Toggled by the footer
+    // version button (the "Scribble Dashboard v1.x.x" text on the bottom
+    // right side of the footer). The STATE lives in the top-level wrapper
+    // (above the shell key) so it survives the apply-triggered remount;
+    // flipping it never touches the shared file session — returning to the
+    // workspace keeps every open file intact.
     // Capture the shared store during render — calling the accessor inside an
     // event handler would be an invalid hook call
     const store = scribbleFileStore();
@@ -550,7 +670,19 @@ const DashboardShell = () => {
     }, [store]);
 
     // ── Plugin execution ──
-    const plugins = getScribblePlugins();
+    // The settings store is read here so plugin on/off filtering re-renders
+    // the workspace the moment a toggle flips (the settings screen lives in
+    // the SAME shell tree, so the store subscription reaches both).
+    const settings = scribbleSettingsStore();
+    // Only ENABLED plugins execute. The registry snapshot is filtered by
+    // the settings' plugins[id].enabled flag — a plugin with no settings
+    // entry defaults to ON (defensive; the dashboard materializes every
+    // registered id). Disabled plugins lose BOTH their sidebar slot and
+    // their content-tab contribution.
+    const plugins = getScribblePlugins().filter((plugin) => {
+        const entry = settings.settings.plugins[plugin.id];
+        return entry ? entry.enabled : true;
+    });
 
     // Static slots: gather sidebar slot assignments in plugin sequence order
     const sidebarNodes: { pluginId: string; node: React.ReactNode }[] = [];
@@ -612,15 +744,37 @@ const DashboardShell = () => {
             <HeaderBar>
                 <HeaderInner>
                     <HeaderTitle>Scribble Dashboard</HeaderTitle>
-                    <HeaderSubtitle>Drop a text file anywhere!</HeaderSubtitle>
+                    <HeaderSubtitle>
+                        {settingsMode ? 'Configuration' : 'Drop a text file anywhere!'}
+                    </HeaderSubtitle>
                 </HeaderInner>
             </HeaderBar>
             {/* Content area: LEFT column holds the plugins' sidebar slots
                 (the file list), RIGHT pane renders the plugins' content tabs
                 for the active file (placeholder when nothing is open). The
                 dashed outline lives INSIDE here (absolute); the page itself
-                never scrolls. */}
-            <ContentArea>
+                never scrolls. In settings mode the WHOLE screen swaps to the
+                configuration format: the sidebar shows the "Setting" entry +
+                plugins on/off list, the pane shows the configuration JSON
+                panel. The workspace render is UNMOUNTED while settings are
+                open — editors/CodeMirror instances are torn down and rebuilt
+                on return (a fresh full-UI mount), while the file session
+                state survives in the dashboard wrapper above. The WORKSPACE
+                branch carries the revision key: every settings apply
+                remounts it (fresh editors/tabs) while the settings screen
+                itself stays mounted — its status line ("Settings applied —
+                UI refreshed.") must survive the apply to be visible. */}
+            {settingsMode ? (
+                <ContentArea>
+                    <SidebarColumn data-testid="sidebar-column">
+                        <SettingsSidebar onExit={() => onToggleSettings(false)} />
+                    </SidebarColumn>
+                    <ContentPane data-testid="content-pane">
+                        <SettingsScreen />
+                    </ContentPane>
+                </ContentArea>
+            ) : (
+            <ContentArea key={`workspace-${settingsRevision}`}>
                 <SidebarColumn data-testid="sidebar-column">
                     {sidebarNodes.map(({ pluginId, node }) => (
                         <React.Fragment key={pluginId}>{node}</React.Fragment>
@@ -684,21 +838,40 @@ const DashboardShell = () => {
                     <DropOverlay data-testid="drop-overlay">Drop to open a file</DropOverlay>
                 ) : null}
             </ContentArea>
+            )}
             <FooterBar data-testid="dashboard-footer">
                 <FooterInner>
-                    {/* Left side: product name with the version suffix —
-                        same pattern as FormatterDashboard (left side = name +
-                        version, right side = count). The version comes from
-                        the compile-time __APP_VERSION__ constant injected by
-                        vite.config.ts `define` (declared ambient in
-                        src/vite-env.d.ts). The lib build (tsconfig.build.json)
-                        never sees the constant since the footer lives in this
-                        app-only dashboard file. */}
-                    <span>Scribble Dashboard v{__APP_VERSION__}</span>
-                    {/* Right side: loaded plugin count */}
-                    <span>
-                        {plugins.length} plugin{plugins.length === 1 ? '' : 's'} loaded
-                    </span>
+                    {/* RIGHT side carries the version text as a BUTTON: the
+                        user asked for "Scribble Dashboard v1.x.x on the
+                        bottom right" to open the configuration/setting
+                        format. Clicking it toggles the settings screen.
+                        While settings are open the button renders as a
+                        plain span (settings-mode-indicator) showing the
+                        loaded plugin count — exiting happens via the
+                        Setting sidebar entry, so the toggle can't be
+                        double-armed from inside settings. The version comes
+                        from the compile-time __APP_VERSION__ constant
+                        injected by vite.config.ts `define` (declared
+                        ambient in src/vite-env.d.ts); the lib build
+                        (tsconfig.build.json) never sees the constant since
+                        the footer lives in this app-only dashboard file. */}
+                    {settingsMode ? (
+                        <span data-testid="settings-mode-indicator">
+                            {plugins.length} plugin{plugins.length === 1 ? '' : 's'} loaded
+                        </span>
+                    ) : (
+                        <FooterVersionButton
+                            type="button"
+                            active={false}
+                            aria-pressed={false}
+                            aria-label="Open settings"
+                            title="Open settings"
+                            onClick={() => onToggleSettings(true)}
+                            data-testid="footer-version-button"
+                        >
+                            Scribble Dashboard v{__APP_VERSION__}
+                        </FooterVersionButton>
+                    )}
                 </FooterInner>
             </FooterBar>
         </DashboardRoot>

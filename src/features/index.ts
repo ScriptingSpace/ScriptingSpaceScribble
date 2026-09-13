@@ -20,3 +20,4 @@ export * from './yamlViewer';
 export * from './openApiViewer';
 export * from './imageViewer';
 export * from './pdfViewer';
+export * from './settings';

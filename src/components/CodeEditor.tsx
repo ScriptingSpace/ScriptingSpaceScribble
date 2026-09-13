@@ -129,8 +129,7 @@ export type CodeEditorProps = {
     // the generic editor into a structure-aware JSON editor.
     extensions?: Extension[];
 };
-
-// Code editor surface for opened files, built on CodeMirror 6 via the
+// Editor surface for opened files, built on CodeMirror 6 via the
 // @uiw/react-codemirror wrapper (line numbers, bracket matching, history,
 // syntax-aware editing out of the box — no hand-rolled textarea logic).
 // theme="none" disables the wrapper's One Dark injection so ONLY the custom
@@ -141,6 +140,14 @@ export type CodeEditorProps = {
 // (EditorContainer overflow: hidden clips the frame; the '100%' height prop
 // pins the editor to the container so the scroller gets a bounded box).
 // Horizontal overflow never happens — lineWrapping soft-wraps every line.
+//
+// VIEW EXPOSURE: onCreateEditor captures the live EditorView and stores it
+// on the container DOM element (a non-enumerable property so React's DOM
+// diffing never touches it). CodeMirror VIRTUALIZES the DOM — only the
+// visible viewport's lines exist as nodes — so tests that need the FULL
+// document (e.g. the settings JSON draft, which exceeds the jsdom viewport
+// with 13 plugins) read view.state.doc.toString() through this handle
+// instead of the .cm-content textContent probe.
 export const CodeEditor = ({ value, onChange, testId, height, extensions }: CodeEditorProps) => (
     <EditorContainer data-testid={testId ?? 'code-editor'}>
         <CodeMirror
@@ -153,6 +160,15 @@ export const CodeEditor = ({ value, onChange, testId, height, extensions }: Code
             // (JSON grammar, linter) reliably overrides the generic setup
             extensions={[...editorExtensions, ...(extensions ?? [])]}
             style={{ height: '100%' }}
+            onCreateEditor={(view) => {
+                // Store the live EditorView on the .cm-editor DOM element
+                // itself (view.dom IS the editor root element) as a plain
+                // expando property for full-document reads (see the VIEW
+                // EXPOSURE note above). Attaching to view.dom keeps the
+                // handle lookup independent of wrapper chrome — tests read
+                // container.querySelector('.cm-editor').cmEditorView.
+                (view.dom as unknown as { cmEditorView?: unknown }).cmEditorView = view;
+            }}
         />
     </EditorContainer>
 );

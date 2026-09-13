@@ -12,6 +12,11 @@
 // true there), so the OpenAPI tab wins for spec files without disturbing
 // generic YAML ordering (cross-reference:
 // src/dashboards/ScribbleDashboard.tsx — matched/unmatched partition).
+//
+// typescript-viewer registers AFTER the viewers but its `matches` pulls
+// .ts/.js family files to the FRONT of the tab order for those files
+// ([Typescript][Editor][Json]...), mirroring how json-viewer claims .json.
+// java/python/rust-viewer follow the same pattern for .java/.py/.rs files.
 export * from './sidebar';
 export * from './textReader';
 export * from './jsonViewer';
@@ -20,4 +25,8 @@ export * from './yamlViewer';
 export * from './openApiViewer';
 export * from './imageViewer';
 export * from './pdfViewer';
+export * from './typescriptViewer';
+export * from './javaViewer';
+export * from './pythonViewer';
+export * from './rustViewer';
 export * from './settings';

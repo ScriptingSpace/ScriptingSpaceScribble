@@ -13,11 +13,36 @@ const readEditorText = (): string => {
     return editor.querySelector('.cm-content')?.textContent ?? '';
 };
 
-// Reads the CodeMirror document text out of the JSON editor container
+// Reads the CodeMirror document text out of the workspace JSON editor
+// container (json-viewer plugin tab)
 const readJsonEditorText = (): string => {
     const editor = screen.getByTestId('json-editor');
     return editor.querySelector('.cm-content')?.textContent ?? '';
 };
+
+// Reads the FULL document text out of the SETTINGS JSON editor container.
+// Uses the cmEditorView expando (the live EditorView CodeEditor.tsx stores
+// on the .cm-editor element via onCreateEditor) to read the document STATE —
+// the .cm-content DOM probe only contains the VIRTUALIZED viewport
+// (CodeMirror renders only visible lines; with 13 plugins the pretty-printed
+// draft exceeds the jsdom viewport and JSON.parse on the truncated text
+// fails). Cross-reference: src/components/CodeEditor.probe.test.tsx verifies
+// the handle reads full docs under virtualization.
+const readSettingsJsonText = (): string => {
+    const editor = screen.getByTestId('settings-json-editor');
+    const cmEditor = editor.querySelector('.cm-editor') as unknown as
+        | { cmEditorView?: { state: { doc: { toString(): string } } } }
+        | null;
+    const view = cmEditor?.cmEditorView;
+    if (view?.state?.doc?.toString) return view.state.doc.toString();
+    // Fallback for environments without the handle (kept for robustness)
+    return editor.querySelector('.cm-content')?.textContent ?? '';
+};
+
+// Parses the settings JSON draft out of the editor's FULL document state
+// (see readSettingsJsonText — the DOM probe is viewport-truncated)
+const readSeededSettings = (): any =>
+    JSON.parse(readSettingsJsonText());
 
 describe('ScribbleDashboard', () => {
     it('renders the dashboard header', () => {
@@ -105,9 +130,14 @@ describe('ScribbleDashboard', () => {
         // FIRST and is active by default. Only plugins whose renderFile
         // returns a node get tabs: OpenAPI (content gate), Image and Pdf
         // (kind gate) contribute nothing for a .json file, so the bar is
-        // [Json][General][Markdown][Yaml]
+        // [Json][General][Markdown][Yaml][Typescript][Java][Python][Rust] —
+        // the code editors are AFTER Json because their .ts/.js/.java/.py/
+        // .rs matchers do not claim .json, so they keep their registration-
+        // order fallback slots
         const tabBar = screen.getByTestId('tab-bar');
-        expect(tabBar.textContent).toBe('JsonGeneralMarkdownYaml');
+        expect(tabBar.textContent).toBe(
+            'JsonGeneralMarkdownYamlTypescriptJavaPythonRust',
+        );
         const jsonTab = screen.getByTestId('content-tab-json-viewer');
         expect(jsonTab.className).not.toBe(
             screen.getByTestId('content-tab-text-reader').className,
@@ -132,12 +162,159 @@ describe('ScribbleDashboard', () => {
             expect(screen.getByTestId('sidebar-file-notes.txt')).toBeDefined();
         });
 
-        // No matcher claims .txt (markdown/yaml match by extension only) →
-        // registration order preserved and the first tab (General) is active.
-        // OpenAPI/Image/Pdf contribute nothing for a .txt file, so the bar is
-        // [General][Json][Markdown][Yaml]
-        expect(screen.getByTestId('tab-bar').textContent).toBe('GeneralJsonMarkdownYaml');
+        // No matcher claims .txt (markdown/yaml/typescript match by
+        // extension only) → registration order preserved and the first tab
+        // (General) is active. OpenAPI/Image/Pdf contribute nothing for a
+        // .txt file, so the bar is
+        // [General][Json][Markdown][Yaml][Typescript]
+        expect(screen.getByTestId('tab-bar').textContent).toBe(
+            'GeneralJsonMarkdownYamlTypescriptJavaPythonRust',
+        );
         expect(readEditorText()).toBe('plain');
+    });
+
+    it('claims .ts and .js files with the Typescript tab first (matched-first ordering)', async () => {
+        render(<ScribbleDashboard />);
+
+        // A .ts file — the typescript-viewer plugin's `matches` claims it →
+        // its tab comes FIRST, ahead of the generic General editor. OpenAPI/
+        // Image/Pdf contribute nothing for a .ts file, so the bar is
+        // [Typescript][General][Json][Markdown][Yaml][Java][Python][Rust]
+        fireEvent.drop(screen.getByTestId('dashboard-root'), {
+            dataTransfer: {
+                files: [
+                    new File(
+                        ['const answer: number = 42;'],
+                        'answer.ts',
+                        { type: 'text/plain' },
+                    ),
+                ],
+            },
+        });
+
+        await waitFor(() => {
+            expect(screen.getByTestId('sidebar-file-answer.ts')).toBeDefined();
+        });
+
+        expect(screen.getByTestId('tab-bar').textContent).toBe(
+            'TypescriptGeneralJsonMarkdownYamlJavaPythonRust',
+        );
+        // The TypeScript editor is mounted (JS/TS grammar CodeMirror), not
+        // the generic editor — its content carries the same payload
+        expect(screen.getByTestId('typescript-editor')).toBeDefined();
+        expect(
+            screen
+                .getByTestId('typescript-editor')
+                .querySelector('.cm-content')?.textContent,
+        ).toBe('const answer: number = 42;');
+        expect(screen.queryByTestId('text-reader-editor')).toBeNull();
+
+        // The Typescript tab is the matched-first tab → active by default
+        const tsTab = screen.getByTestId('content-tab-typescript-viewer');
+        expect(tsTab.textContent).toBe('Typescript');
+        expect(tsTab.className).not.toBe(
+            screen.getByTestId('content-tab-text-reader').className,
+        );
+
+        // A .js file gets the same treatment (auto-detect covers both)
+        fireEvent.drop(screen.getByTestId('dashboard-root'), {
+            dataTransfer: {
+                files: [new File(['let x = 1;'], 'script.js', { type: 'text/plain' })],
+            },
+        });
+        await waitFor(() => {
+            expect(screen.getByTestId('sidebar-file-script.js')).toBeDefined();
+        });
+        // The latest drop is active → the Typescript tab is still first and
+        // the editor shows the .js payload
+        expect(screen.getByTestId('tab-bar').textContent).toBe(
+            'TypescriptGeneralJsonMarkdownYamlJavaPythonRust',
+        );
+        expect(
+            screen
+                .getByTestId('typescript-editor')
+                .querySelector('.cm-content')?.textContent,
+        ).toBe('let x = 1;');
+    });
+
+    it('claims .java, .py and .rs files with their language tab first (matched-first ordering)', async () => {
+        render(<ScribbleDashboard />);
+
+        // A .java file — the java-viewer plugin's `matches` claims it → its
+        // tab comes FIRST. OpenAPI/Image/Pdf contribute nothing for a .java
+        // file, so the bar is
+        // [Java][General][Json][Markdown][Yaml][Typescript][Python][Rust]
+        fireEvent.drop(screen.getByTestId('dashboard-root'), {
+            dataTransfer: {
+                files: [
+                    new File(
+                        ['class Main { public static void main(String[] a) {} }'],
+                        'Main.java',
+                        { type: 'text/plain' },
+                    ),
+                ],
+            },
+        });
+        await waitFor(() => {
+            expect(screen.getByTestId('sidebar-file-Main.java')).toBeDefined();
+        });
+        expect(screen.getByTestId('tab-bar').textContent).toBe(
+            'JavaGeneralJsonMarkdownYamlTypescriptPythonRust',
+        );
+        // The Java editor is mounted (Java grammar CodeMirror)
+        expect(screen.getByTestId('java-editor')).toBeDefined();
+        expect(
+            screen.getByTestId('java-editor').querySelector('.cm-content')?.textContent,
+        ).toBe('class Main { public static void main(String[] a) {} }');
+
+        // A .py file — the python-viewer plugin's `matches` claims it → its
+        // tab comes FIRST. Bar:
+        // [Python][General][Json][Markdown][Yaml][Typescript][Java][Rust]
+        // NOTE: single-line payload — CodeMirror renders each line as a
+        // separate DOM node, so the .cm-content textContent probe flattens
+        // line breaks away (single-line keeps the assertion exact)
+        fireEvent.drop(screen.getByTestId('dashboard-root'), {
+            dataTransfer: {
+                files: [
+                    new File(['def greet():    return "hi"'], 'app.py', {
+                        type: 'text/plain',
+                    }),
+                ],
+            },
+        });
+        await waitFor(() => {
+            expect(screen.getByTestId('sidebar-file-app.py')).toBeDefined();
+        });
+        expect(screen.getByTestId('tab-bar').textContent).toBe(
+            'PythonGeneralJsonMarkdownYamlTypescriptJavaRust',
+        );
+        expect(screen.getByTestId('python-editor')).toBeDefined();
+        expect(
+            screen.getByTestId('python-editor').querySelector('.cm-content')?.textContent,
+        ).toBe('def greet():    return "hi"');
+
+        // A .rs file — the rust-viewer plugin's `matches` claims it → its
+        // tab comes FIRST. Bar:
+        // [Rust][General][Json][Markdown][Yaml][Typescript][Java][Python]
+        fireEvent.drop(screen.getByTestId('dashboard-root'), {
+            dataTransfer: {
+                files: [
+                    new File(['fn main() { println!("hi"); }'], 'main.rs', {
+                        type: 'text/plain',
+                    }),
+                ],
+            },
+        });
+        await waitFor(() => {
+            expect(screen.getByTestId('sidebar-file-main.rs')).toBeDefined();
+        });
+        expect(screen.getByTestId('tab-bar').textContent).toBe(
+            'RustGeneralJsonMarkdownYamlTypescriptJavaPython',
+        );
+        expect(screen.getByTestId('rust-editor')).toBeDefined();
+        expect(
+            screen.getByTestId('rust-editor').querySelector('.cm-content')?.textContent,
+        ).toBe('fn main() { println!("hi"); }');
     });
 
     it('switches to the Json tab on click and back to the General tab', async () => {
@@ -202,7 +379,9 @@ describe('ScribbleDashboard', () => {
         // The Json tab still comes first (extension matched) and the editor
         // mounts with the broken payload — the linter (jsonParseLinter) marks
         // the parse error inline (cm-lintPoint in the DOM)
-        expect(screen.getByTestId('tab-bar').textContent).toBe('JsonGeneralMarkdownYaml');
+        expect(screen.getByTestId('tab-bar').textContent).toBe(
+            'JsonGeneralMarkdownYamlTypescriptJavaPythonRust',
+        );
         const jsonEditor = screen.getByTestId('json-editor');
         expect(jsonEditor.querySelector('.cm-content')?.textContent).toBe('not json {');
     });
@@ -357,13 +536,14 @@ describe('ScribbleDashboard', () => {
         render(<ScribbleDashboard />);
 
         // Footer layout: the RIGHT side carries the version text — rendered
-        // as a BUTTON that opens the settings screen. NINE plugins register
-        // by default (sidebar, general editor, json, markdown, yaml,
-        // openapi, image, pdf, settings). The version suffix comes from the
-        // compile-time __APP_VERSION__ constant (vitest.config.ts `define`
-        // reads it from package.json); building the expected string from the
-        // SAME constant keeps the assertion version-agnostic so package
-        // version bumps never break this test.
+        // as a BUTTON that opens the settings screen. THIRTEEN plugins
+        // register by default (sidebar, general editor, json, markdown,
+        // yaml, openapi, image, pdf, typescript, java, python, rust,
+        // settings). The version suffix comes from the compile-time
+        // __APP_VERSION__ constant (vitest config `define` reads it from
+        // package.json); building the expected string from the SAME
+        // constant keeps the assertion version-agnostic so package version
+        // bumps never break this test.
         const footer = screen.getByTestId('dashboard-footer');
         expect(footer.textContent).toBe(`Scribble Dashboard v${__APP_VERSION__}`);
         // The version text is a button (aria-label announces the affordance)
@@ -389,10 +569,14 @@ describe('ScribbleDashboard', () => {
         expect(screen.getByTestId('settings-entry-json')).toBeDefined();
         expect(screen.queryByTestId('file-list')).toBeNull();
 
-        // Plugins on/off list: NINE rows (every registered plugin), all ON
-        // by default
+        // Plugins on/off list: THIRTEEN rows (every registered plugin), all
+        // ON by default
         expect(screen.getByTestId('settings-plugin-text-reader')).toBeDefined();
         expect(screen.getByTestId('settings-plugin-json-viewer')).toBeDefined();
+        expect(screen.getByTestId('settings-plugin-typescript-viewer')).toBeDefined();
+        expect(screen.getByTestId('settings-plugin-java-viewer')).toBeDefined();
+        expect(screen.getByTestId('settings-plugin-python-viewer')).toBeDefined();
+        expect(screen.getByTestId('settings-plugin-rust-viewer')).toBeDefined();
         const toggles = [
             'text-reader',
             'json-viewer',
@@ -401,17 +585,22 @@ describe('ScribbleDashboard', () => {
             'openapi-viewer',
             'image-viewer',
             'pdf-viewer',
+            'typescript-viewer',
+            'java-viewer',
+            'python-viewer',
+            'rust-viewer',
             'sidebar',
             'settings',
         ].map((id) => screen.getByTestId(`settings-plugin-toggle-${id}`));
         expect(toggles.map((toggle) => toggle.getAttribute('aria-pressed'))).toEqual([
-            'true', 'true', 'true', 'true', 'true', 'true', 'true', 'true', 'true',
+            'true', 'true', 'true', 'true', 'true', 'true', 'true',
+            'true', 'true', 'true', 'true', 'true', 'true',
         ]);
 
         // The configuration JSON panel is seeded with the current settings —
-        // every registered plugin id, all enabled
-        const jsonEditor = screen.getByTestId('settings-json-editor');
-        const seeded = JSON.parse(jsonEditor.querySelector('.cm-content')?.textContent ?? '{}');
+        // every registered plugin id, all enabled (read via the full doc
+        // state — see readJsonEditorText)
+        const seeded = readSeededSettings();
         expect(seeded).toEqual({
             plugins: {
                 'text-reader': { enabled: true },
@@ -421,6 +610,10 @@ describe('ScribbleDashboard', () => {
                 'openapi-viewer': { enabled: true },
                 'image-viewer': { enabled: true },
                 'pdf-viewer': { enabled: true },
+                'typescript-viewer': { enabled: true },
+                'java-viewer': { enabled: true },
+                'python-viewer': { enabled: true },
+                'rust-viewer': { enabled: true },
                 sidebar: { enabled: true },
                 settings: { enabled: true },
             },
@@ -454,8 +647,7 @@ describe('ScribbleDashboard', () => {
                 ),
             ).toBe('false');
         });
-        const jsonEditor = screen.getByTestId('settings-json-editor');
-        const draft = JSON.parse(jsonEditor.querySelector('.cm-content')?.textContent ?? '{}');
+        const draft = readSeededSettings();
         expect(draft.plugins['markdown-viewer']).toEqual({ enabled: false });
         // All other plugins stay on
         expect(draft.plugins['text-reader']).toEqual({ enabled: true });
@@ -463,10 +655,7 @@ describe('ScribbleDashboard', () => {
         // Toggle it back ON — the draft mirrors the flip back
         fireEvent.click(screen.getByTestId('settings-plugin-toggle-markdown-viewer'));
         await waitFor(() => {
-            const redraft = JSON.parse(
-                screen.getByTestId('settings-json-editor').querySelector('.cm-content')
-                    ?.textContent ?? '{}',
-            );
+            const redraft = readSeededSettings();
             expect(redraft.plugins['markdown-viewer']).toEqual({ enabled: true });
         });
     });

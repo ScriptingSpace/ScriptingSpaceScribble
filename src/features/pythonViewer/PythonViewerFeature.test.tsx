@@ -1,6 +1,6 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { useStateHook } from '@presource/react';
 import {
     PythonViewerFeature,
@@ -9,6 +9,21 @@ import {
 } from './PythonViewerFeature';
 import { ScribbleFileProvider, scribbleFileStore } from '../../functions';
 import type { ScribbleFile } from '../../functions';
+
+// The Pyodide access layer is MOCKED at the module boundary — the real
+// runtime fetches ~18 MB from a CDN and jsdom has no WebAssembly workload.
+// Only runPython is replaced; the rest of the functions barrel (store,
+// palette, getPythonStatus, isPythonSupported) stays intact so the Run bar's
+// status hint renders from the real status machine.
+const { runPythonMock } = vi.hoisted(() => ({ runPythonMock: vi.fn() }));
+
+vi.mock('../../functions/pythonRuntime', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('../../functions/pythonRuntime')>();
+    return {
+        ...actual,
+        runPython: (...args: Parameters<typeof runPythonMock>) => runPythonMock(...args),
+    };
+});
 
 afterEach(() => {
     cleanup();
@@ -286,5 +301,129 @@ describe('PythonEditorSurface (direct render)', () => {
         await waitFor(() => {
             expect(readEditorText()).toBe('class A:    pass');
         });
+    });
+});
+
+describe('Run button + output panel (mocked runPython)', () => {
+    it('passes the live editor content to runPython and renders logs + repr result', async () => {
+        runPythonMock.mockResolvedValue({
+            logs: ['printed-line'],
+            error: null,
+            result: "'42'",
+        });
+
+        render(
+            <Harness>
+                <PythonViewerFeature />
+            </Harness>,
+        );
+
+        fireEvent.click(screen.getByTestId('drop-python'));
+        await waitFor(() => {
+            expect(readEditorText()).toBe('def greet():    return "hi"');
+        });
+
+        fireEvent.click(screen.getByTestId('python-run'));
+
+        // The access layer received the CURRENT file content
+        expect(runPythonMock).toHaveBeenCalledTimes(1);
+        expect(runPythonMock).toHaveBeenCalledWith('def greet():    return "hi"');
+
+        // Panel: header label + stdout line + cyan repr line. The exact
+        // full-panel string is asserted.
+        await waitFor(() => {
+            expect(screen.getByTestId('python-output')).toBeDefined();
+        });
+        expect(screen.getByTestId('python-output').textContent).toBe(
+            "Outputprinted-line'42'",
+        );
+        expect(screen.getByTestId('python-run').textContent).toBe('Run');
+        // No error flag on a clean run
+        expect(screen.queryByTestId('python-output-error-flag')).toBeNull();
+    });
+
+    it('renders the traceback error line + flag on a failed run', async () => {
+        runPythonMock.mockResolvedValue({
+            logs: [],
+            error: 'ZeroDivisionError: division by zero',
+            result: '',
+        });
+
+        render(
+            <Harness>
+                <PythonViewerFeature />
+            </Harness>,
+        );
+
+        fireEvent.click(screen.getByTestId('drop-python'));
+        await waitFor(() => {
+            expect(readEditorText()).toBe('def greet():    return "hi"');
+        });
+
+        fireEvent.click(screen.getByTestId('python-run'));
+
+        await waitFor(() => {
+            expect(screen.getByTestId('python-output-error-flag')).toBeDefined();
+        });
+        // Error only — no logs, no result line (the header carries the
+        // "error" flag text, hence Outputerror…)
+        expect(screen.getByTestId('python-output').textContent).toBe(
+            'OutputerrorZeroDivisionError: division by zero',
+        );
+    });
+
+    it('disables the button while a run is in flight and re-enables after', async () => {
+        // Deferred promise — the run stays in flight until we resolve it
+        let resolveRun!: (value: { logs: string[]; error: string | null; result: string }) => void;
+        runPythonMock.mockReturnValue(
+            new Promise((resolve) => {
+                resolveRun = resolve;
+            }),
+        );
+
+        render(
+            <Harness>
+                <PythonViewerFeature />
+            </Harness>,
+        );
+
+        fireEvent.click(screen.getByTestId('drop-python'));
+        await waitFor(() => {
+            expect(readEditorText()).toBe('def greet():    return "hi"');
+        });
+
+        fireEvent.click(screen.getByTestId('python-run'));
+
+        // In flight: the label announces the run (the mocked module never
+        // flips the real status machine, so the label is 'Running…')
+        expect(screen.getByTestId('python-run').textContent).toBe('Running…');
+        expect((screen.getByTestId('python-run') as HTMLButtonElement).disabled).toBe(true);
+
+        resolveRun({ logs: [], error: null, result: '' });
+        await waitFor(() => {
+            expect(screen.getByTestId('python-output')).toBeDefined();
+        });
+        expect(screen.getByTestId('python-run').textContent).toBe('Run');
+        expect((screen.getByTestId('python-run') as HTMLButtonElement).disabled).toBe(false);
+    });
+
+    it('does not render the output panel before the first run and shows the idle hint', async () => {
+        render(
+            <Harness>
+                <PythonViewerFeature />
+            </Harness>,
+        );
+
+        fireEvent.click(screen.getByTestId('drop-python'));
+        await waitFor(() => {
+            expect(readEditorText()).toBe('def greet():    return "hi"');
+        });
+
+        expect(screen.queryByTestId('python-output')).toBeNull();
+        expect(screen.getByTestId('python-run')).toBeDefined();
+        // Idle status hint — the real status machine (not mocked) reads idle
+        expect(screen.getByTestId('python-status-hint').textContent).toBe(
+            'Python runtime: not loaded',
+        );
     });
 });

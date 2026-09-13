@@ -1,6 +1,6 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { useStateHook } from '@presource/react';
 import {
     TypeScriptViewerFeature,
@@ -9,6 +9,22 @@ import {
 } from './TypeScriptViewerFeature';
 import { ScribbleFileProvider, scribbleFileStore } from '../../functions';
 import type { ScribbleFile } from '../../functions';
+
+// The run pipeline is MOCKED at the worker-facade boundary — the real
+// jsRunner spawns a module worker (jsdom has no Worker; it would fall back
+// to main-thread eval, but mocking keeps the test hermetic and lets us
+// assert the exact result the panel renders).
+const { runJsAsyncMock } = vi.hoisted(() => ({ runJsAsyncMock: vi.fn() }));
+
+vi.mock('../../functions/jsRunner', async (importOriginal) => {
+    // Keep the rest of the functions barrel intact (store, palette, …) —
+    // only the worker facade is replaced
+    const actual = await importOriginal<typeof import('../../functions')>();
+    return {
+        ...actual,
+        runJsAsync: (...args: Parameters<typeof runJsAsyncMock>) => runJsAsyncMock(...args),
+    };
+});
 
 afterEach(() => {
     cleanup();
@@ -345,5 +361,121 @@ describe('TypeScriptEditorSurface (direct render)', () => {
         await waitFor(() => {
             expect(readEditorText()).toBe('type A = string;');
         });
+    });
+});
+
+describe('Run button + output panel (mocked runJsAsync)', () => {
+    it('passes the live editor content + isTypeScript=true for a .ts file and renders the result', async () => {
+        runJsAsyncMock.mockResolvedValue({
+            logs: ['[log] 42'],
+            error: null,
+            durationMs: 7,
+        });
+
+        render(
+            <Harness>
+                <TypeScriptViewerFeature />
+            </Harness>,
+        );
+
+        fireEvent.click(screen.getByTestId('drop-ts'));
+        await waitFor(() => {
+            expect(readEditorText()).toBe('const answer: number = 42;');
+        });
+
+        fireEvent.click(screen.getByTestId('typescript-run'));
+
+        // The facade received the CURRENT file content + the TS flag
+        // (.ts → isTypeScript true for Sucrase)
+        expect(runJsAsyncMock).toHaveBeenCalledTimes(1);
+        expect(runJsAsyncMock).toHaveBeenCalledWith('const answer: number = 42;', true);
+
+        // Output panel renders the captured log + duration readout. The
+        // panel's textContent includes the "Output" header label — the
+        // exact full-panel string is asserted.
+        await waitFor(() => {
+            expect(screen.getByTestId('typescript-output')).toBeDefined();
+        });
+        expect(screen.getByTestId('typescript-output').textContent).toBe('Output[log] 42');
+        expect(screen.getByTestId('typescript-run').textContent).toBe('Run');
+        // No error flag on a clean run
+        expect(screen.queryByTestId('typescript-output-error-flag')).toBeNull();
+    });
+
+    it('passes isTypeScript=false for a .js file', async () => {
+        runJsAsyncMock.mockResolvedValue({ logs: [], error: null, durationMs: 1 });
+
+        render(
+            <Harness>
+                <TypeScriptViewerFeature />
+            </Harness>,
+        );
+
+        fireEvent.click(screen.getByTestId('drop-js'));
+        await waitFor(() => {
+            expect(readEditorText()).toBe('let x = 1;');
+        });
+
+        fireEvent.click(screen.getByTestId('typescript-run'));
+
+        // Pure JS → no TypeScript transform for Sucrase
+        await waitFor(() => {
+            expect(runJsAsyncMock).toHaveBeenCalledWith('let x = 1;', false);
+        });
+    });
+
+    it('disables the button while a run is in flight and renders the error line on failure', async () => {
+        // Deferred promise — the run stays in flight until we resolve it
+        let resolveRun!: (value: { logs: string[]; error: string | null; durationMs: number }) => void;
+        runJsAsyncMock.mockReturnValue(
+            new Promise((resolve) => {
+                resolveRun = resolve;
+            }),
+        );
+
+        render(
+            <Harness>
+                <TypeScriptViewerFeature />
+            </Harness>,
+        );
+
+        fireEvent.click(screen.getByTestId('drop-ts'));
+        await waitFor(() => {
+            expect(readEditorText()).toBe('const answer: number = 42;');
+        });
+
+        fireEvent.click(screen.getByTestId('typescript-run'));
+
+        // In flight: label switches, button disabled
+        expect(screen.getByTestId('typescript-run').textContent).toBe('Running…');
+        expect((screen.getByTestId('typescript-run') as HTMLButtonElement).disabled).toBe(true);
+
+        // Resolve with a failing run — error flag + orange error line
+        resolveRun({ logs: [], error: 'TypeError: x is not a function', durationMs: 3 });
+        await waitFor(() => {
+            expect(screen.getByTestId('typescript-output-error-flag')).toBeDefined();
+        });
+        expect(screen.getByTestId('typescript-output').textContent).toBe(
+            'OutputerrorTypeError: x is not a function',
+        );
+        // Button re-enabled with the idle label
+        expect(screen.getByTestId('typescript-run').textContent).toBe('Run');
+        expect((screen.getByTestId('typescript-run') as HTMLButtonElement).disabled).toBe(false);
+    });
+
+    it('does not render the output panel before the first run', async () => {
+        render(
+            <Harness>
+                <TypeScriptViewerFeature />
+            </Harness>,
+        );
+
+        fireEvent.click(screen.getByTestId('drop-ts'));
+        await waitFor(() => {
+            expect(readEditorText()).toBe('const answer: number = 42;');
+        });
+
+        expect(screen.queryByTestId('typescript-output')).toBeNull();
+        expect(screen.queryByTestId('typescript-run')).toBeDefined();
     });
 });

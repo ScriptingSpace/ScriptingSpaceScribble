@@ -8,9 +8,27 @@ import React from 'react';
 // deps — autocomplete/language/lint/state/view/@lezer/common — are already
 // hoisted in the workspace root via the other @codemirror packages).
 import { javascript, autoCloseTags } from '@codemirror/lang-javascript';
-import { styledComponent } from '@presource/react';
+import { styledComponent, useStateHook } from '@presource/react';
 import { CodeEditor } from '../../components';
-import { registerScribblePlugin, scribbleFileStore } from '../../functions';
+import {
+    registerScribblePlugin,
+    scribbleFileStore,
+    // Run pipeline — worker facade (falls back to main-thread eval in
+    // Worker-less realms like jsdom; see src/functions/jsRunner.ts)
+    runJsAsync,
+    // Result contract for the output panel (same shape pythonRuntime's
+    // PyRunResult mirrors so both panels render uniformly)
+    type JsRunResult,
+    // Tokyo Night Storm palette tokens (functions/palette.ts)
+    PALETTE_ACCENT,
+    PALETTE_BORDER,
+    PALETTE_SURFACE,
+    PALETTE_TERTIARY,
+    PALETTE_TEXT_BODY,
+    PALETTE_TEXT_FAINT,
+    PALETTE_TEXT_MUTED,
+    PALETTE_WELL,
+} from '../../functions';
 import type { ScribbleFileLike } from '../../functions';
 
 // ─── Grammar selection ───────────────────────────────────────────────────────
@@ -68,6 +86,111 @@ const EditorStack = styledComponent('div', {
     minHeight: 0,
 });
 
+// ─── Run bar + output panel ──────────────────────────────────────────────────
+
+// Toolbar strip between the editor and the output panel: Run button on the
+// left, duration readout on the right. flexShrink 0 — it never collapses.
+const RunBar = styledComponent('div', {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    padding: '6px 8px',
+    flexShrink: 0,
+    borderTop: `1px solid ${PALETTE_BORDER}`,
+    background: PALETTE_SURFACE,
+});
+
+// The Run button. Disabled while a run is in flight (busy) — re-clicking
+// would otherwise spawn overlapping worker runs whose logs interleave.
+const RunButton = styledComponent<{ busy: boolean }>(
+    'button',
+    {
+        padding: '4px 14px',
+        fontSize: 12,
+        fontWeight: 600,
+        fontFamily: 'inherit',
+        borderRadius: 6,
+        cursor: ({ busy }) => (busy ? 'default' : 'pointer'),
+        // Accent blue fill while idle; dimmed while a run is in flight
+        background: ({ busy }) => (busy ? PALETTE_BORDER : PALETTE_ACCENT),
+        color: '#1a1b26',
+        border: 'none',
+    },
+    // Standard button attributes passthrough (onClick, disabled, testid)
+) as unknown as React.FC<
+    { busy: boolean; children: React.ReactNode } & React.ButtonHTMLAttributes<HTMLButtonElement>
+>;
+
+// Right-aligned execution time readout (from JsRunResult.durationMs)
+const DurationLine = styledComponent('span', {
+    marginLeft: 'auto',
+    fontSize: 11,
+    color: PALETTE_TEXT_FAINT,
+});
+
+// Output panel wrapper — the editor keeps flex:1, the panel takes a FIXED
+// 180px slice below it so the editor never collapses when output appears.
+const OutputPanel = styledComponent('div', {
+    flexShrink: 0,
+    height: 180,
+    display: 'flex',
+    flexDirection: 'column',
+    borderTop: `1px solid ${PALETTE_BORDER}`,
+    background: PALETTE_WELL,
+    minHeight: 0,
+});
+
+// Panel header strip: "Output" label + error flag when the run failed
+const OutputHeader = styledComponent('div', {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    padding: '6px 10px',
+    fontSize: 11,
+    fontWeight: 700,
+    letterSpacing: '0.08em',
+    textTransform: 'uppercase' as const,
+    color: PALETTE_TEXT_MUTED,
+    borderBottom: `1px solid ${PALETTE_BORDER}`,
+    flexShrink: 0,
+});
+
+// Error flag inside the header — orange (palette warning color) so a failed
+// run is visible without reading the body
+const OutputErrorFlag = styledComponent('span', {
+    color: PALETTE_TERTIARY,
+    textTransform: 'none' as const,
+    letterSpacing: 0,
+    fontWeight: 600,
+});
+
+// Scrollable log body — one pre per line keeps whitespace exactly as the
+// sandbox captured it
+const OutputBody = styledComponent('div', {
+    flex: 1,
+    minHeight: 0,
+    overflowY: 'auto' as const,
+    padding: '8px 10px',
+    fontFamily: 'monospace',
+    fontSize: 12,
+    lineHeight: 1.5,
+    color: PALETTE_TEXT_BODY,
+    whiteSpace: 'pre-wrap' as const,
+});
+
+// A single captured log line
+const OutputLine = styledComponent('div', {
+    whiteSpace: 'pre-wrap' as const,
+    wordBreak: 'break-word' as const,
+});
+
+// The error line — orange so it separates from normal [log]/[info] lines
+const OutputErrorLine = styledComponent('div', {
+    whiteSpace: 'pre-wrap' as const,
+    wordBreak: 'break-word' as const,
+    color: PALETTE_TERTIARY,
+});
+
 // ─── Content plugin component ────────────────────────────────────────────────
 
 // Renders the ACTIVE file's code editor with the JS/TS grammar picked by its
@@ -84,6 +207,35 @@ export const TypeScriptEditorSurface: React.FC<{ file: ScribbleFileLike }> = ({ 
     // Capture the store during render — calling the accessor inside an event
     // handler would be an invalid hook call
     const store = scribbleFileStore();
+    // Run state: busy flag while the worker is executing, plus the last
+    // result (logs + error + duration) rendered by the output panel. Null
+    // until the first Run press — the panel only exists after a run.
+    const busy = useStateHook<boolean>(false);
+    const runResult = useStateHook<JsRunResult | null>(null);
+
+    // Run handler: takes the CURRENT editor content (the file prop updates
+    // through the store on every keystroke, so file.content is live),
+    // transpiles + sandboxes it via the worker facade, stores the result.
+    // isTypeScript mirrors the grammar pick: every extension EXCEPT the pure
+    // JS ones (.js/.jsx/.mjs/.cjs) is treated as TypeScript for Sucrase.
+    const handleRun = () => {
+        if (busy()) return;
+        busy(true);
+        const lower = file.name.toLowerCase();
+        const isTypeScript = !(
+            lower.endsWith('.js') ||
+            lower.endsWith('.jsx') ||
+            lower.endsWith('.mjs') ||
+            lower.endsWith('.cjs')
+        );
+        void runJsAsync(file.content, isTypeScript).then((result) => {
+            runResult(result);
+            busy(false);
+        });
+    };
+
+    const result = runResult();
+
     return (
         <SessionLayout data-testid="typescript-viewer-session">
             <EditorStack>
@@ -98,6 +250,43 @@ export const TypeScriptEditorSurface: React.FC<{ file: ScribbleFileLike }> = ({ 
                     extensions={[grammarForFile(file.name), autoCloseTags]}
                 />
             </EditorStack>
+            {/* Run bar — always visible so the button does not shift layout
+                when the first run adds the output panel */}
+            <RunBar>
+                <RunButton
+                    busy={busy()}
+                    disabled={busy()}
+                    onClick={handleRun}
+                    data-testid="typescript-run"
+                >
+                    {busy() ? 'Running…' : 'Run'}
+                </RunButton>
+                {/* Duration readout — only after a completed run */}
+                {result ? <DurationLine>{result.durationMs} ms</DurationLine> : null}
+            </RunBar>
+            {/* Output panel — appears after the first run and stays */}
+            {result ? (
+                <OutputPanel data-testid="typescript-output">
+                    <OutputHeader>
+                        Output
+                        {/* Error flag — the run failed (transpile, sandbox
+                            throw, or timeout) */}
+                        {result.error ? (
+                            <OutputErrorFlag data-testid="typescript-output-error-flag">
+                                error
+                            </OutputErrorFlag>
+                        ) : null}
+                    </OutputHeader>
+                    <OutputBody>
+                        {/* Log lines in emission order, then the error line
+                            last (error after logs mirrors console behavior) */}
+                        {result.logs.map((line, index) => (
+                            <OutputLine key={index}>{line}</OutputLine>
+                        ))}
+                        {result.error ? <OutputErrorLine>{result.error}</OutputErrorLine> : null}
+                    </OutputBody>
+                </OutputPanel>
+            ) : null}
         </SessionLayout>
     );
 };

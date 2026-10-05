@@ -36,7 +36,7 @@ const SidebarRoot = styledComponent('aside', {
     overflow: 'hidden' as const,
 });
 
-// Header label carries the ORANGE accent (the sidebar's identity color)
+// Header label carries the BLUE accent (the sidebar's identity color)
 const SidebarHeader = styledComponent('div', {
     padding: '12px 16px',
     fontSize: 12,
@@ -67,7 +67,7 @@ const EmptyHint = styledComponent('div', {
 });
 
 // One entry per accepted file. The active entry gets the raised background +
-// bright text + ORANGE left accent bar; the rest stay muted and clickable.
+// bright text + BLUE left accent bar; the rest stay muted and clickable.
 const FileEntry = styledComponent<{ active: boolean }>(
     'div',
     {
@@ -85,7 +85,7 @@ const FileEntry = styledComponent<{ active: boolean }>(
         userSelect: 'none' as const,
         transition: 'background 150ms ease, color 150ms ease',
         minWidth: 0,
-        // Active entry carries the orange accent as a 2px left edge
+        // Active entry carries the blue accent as a 2px left edge
         borderLeft: ({ active }) =>
             active ? `2px solid ${PALETTE_ACCENT}` : '2px solid transparent',
     },

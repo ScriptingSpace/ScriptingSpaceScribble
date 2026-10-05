@@ -12,7 +12,7 @@ const pkg = JSON.parse(
 ) as { version: string };
 
 // Relative base so the built bundle works on GitHub Pages / any sub-path host
-// (see the TODO note in the package root index.ts about GitHub Pages deploys).
+// (see the deploy note in the package root index.ts about GitHub Pages deploys).
 export default defineConfig({
     plugins: [react()],
     base: './',

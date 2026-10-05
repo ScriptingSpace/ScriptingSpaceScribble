@@ -9,7 +9,7 @@ import {
 
 // Modular panel that wraps every plugin rendered by the dashboard.
 // Gives all features a consistent card look: title, description, content slot.
-// Warm palette: raised surface + warm border + soft warm shadow.
+// Tokyo Night palette: raised surface + hairline border + soft shadow.
 const Panel = styledComponent('section', {
     display: 'flex',
     flexDirection: 'column',

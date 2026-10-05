@@ -60,8 +60,8 @@ export const TextEditorSurface: React.FC<{ file: ScribbleFileLike }> = ({ file }
 
 // Store-connected wrapper kept for direct-consumption / tests: resolves the
 // ACTIVE file from the shared session and renders the editor surface for it.
-// Renders nothing when no file is open (the dashed content-area outline on
-// the dashboard is the drop affordance in that state).
+// Renders nothing when no file is open (the dashboard's empty-state
+// placeholder is the drop affordance in that case).
 export const TextReaderFeature: React.FC = () => {
     const store = scribbleFileStore();
     const active =

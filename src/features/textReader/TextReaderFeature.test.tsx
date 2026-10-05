@@ -116,7 +116,7 @@ describe('TextReaderFeature', () => {
             </Harness>,
         );
 
-        // The dashed content-area outline on the dashboard is the only
+        // The dashboard's empty-state placeholder is the only
         // affordance in this state
         expect(screen.queryByTestId('text-reader-session')).toBeNull();
         expect(screen.queryByTestId('text-reader-editor')).toBeNull();

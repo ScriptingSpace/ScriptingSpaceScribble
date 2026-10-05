@@ -7,7 +7,7 @@ import {
 
 // Plain-text output surface. Renders dropped file content verbatim — no
 // pattern extraction yet (patterns are a planned plugin capability, see
-// readme.md "Roadmap"). Warm palette: deep well background + warm ivory text.
+// readme.md "Roadmap"). Tokyo Night palette: deep well background + cool body text.
 const Pre = styledComponent('pre', {
     margin: 0,
     padding: 12,

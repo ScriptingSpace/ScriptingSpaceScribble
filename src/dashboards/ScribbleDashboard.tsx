@@ -18,9 +18,9 @@ import {
     parseScribbleSettings,
     scribbleSettingsStore,
     ScribbleSettingsProvider,
-    // Palette tokens — Flexoki-dark-based warm scheme (see functions/palette.ts
-    // for the full rationale + contrast table). Imported as a namespace so
-    // each styled rule reads `palette.X` instead of loose magic hex strings.
+    // Palette tokens — Tokyo Night Storm (see functions/palette.ts
+    // for the full rationale + contrast table). Imported as named constants so
+    // each styled rule reads a named token instead of loose magic hex strings.
     PALETTE_ACCENT,
     PALETTE_ACCENT_BRIGHT,
     PALETTE_BACKGROUND,
@@ -92,7 +92,7 @@ const HeaderTitle = styledComponent('h1', {
     color: PALETTE_TEXT_BRIGHT,
 });
 
-// Subtitle carries the SECONDARY teal — the drop affordance hint doubles as
+// Subtitle carries the SECONDARY purple — the drop affordance hint doubles as
 // the palette's cool counterpoint
 const HeaderSubtitle = styledComponent('p', {
     margin: 0,
@@ -178,7 +178,7 @@ const TabBar = styledComponent('div', {
 });
 
 // One tab per contributing plugin. Active tab gets the raised background +
-// bright text + ORANGE top accent (the palette's primary identity color);
+// bright text + BLUE top accent (the palette's primary identity color);
 // the rest stay muted and clickable.
 const TabButton = styledComponent<{ active: boolean }>(
     'button',
@@ -193,7 +193,7 @@ const TabButton = styledComponent<{ active: boolean }>(
         background: ({ active }) => (active ? PALETTE_BACKGROUND : 'transparent'),
         color: ({ active }) => (active ? PALETTE_TEXT_BRIGHT : PALETTE_TEXT_MUTED),
         cursor: 'pointer',
-        // Active tab carries the orange accent as a 2px top edge
+        // Active tab carries the blue accent as a 2px top edge
         borderTop: ({ active }) => (active ? `2px solid ${PALETTE_ACCENT}` : '2px solid transparent'),
     },
     // The element only needs the style prop plus passthrough button
@@ -314,8 +314,8 @@ const FooterInner = styledComponent('div', {
 // plain muted text so the footer's visual identity is unchanged, but it is
 // keyboard-focusable + announced as a toggle (aria-pressed) so the
 // affordance is discoverable. The `active` prop tints the text with the
-// blue accent while the settings screen is open — the only visible cue that
-// the button is armed.
+// blue accent while armed — the dashboard swaps in the settings-mode
+// indicator span while settings are open, so the button is unmounted there.
 const FooterVersionButton = styledComponent<{ active: boolean }>(
     'button',
     {

@@ -10,7 +10,7 @@ import {
 
 // Visual + interaction shell of a drop zone. It is fully prop-driven so any
 // feature can reuse it: the feature owns the file-reading logic and simply
-// wires the drag/keyboard handlers in (see features/textReader). Tokyo Night
+// wires the drag/keyboard handlers in. Tokyo Night
 // palette: blue dashed accent on drag-over, muted resting state.
 const Zone = styledComponent<{ dragOver: boolean }>(
     'div',

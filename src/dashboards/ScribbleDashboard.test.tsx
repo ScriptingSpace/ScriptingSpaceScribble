@@ -26,8 +26,8 @@ const readJsonEditorText = (): string => {
 // the .cm-content DOM probe only contains the VIRTUALIZED viewport
 // (CodeMirror renders only visible lines; with 13 plugins the pretty-printed
 // draft exceeds the jsdom viewport and JSON.parse on the truncated text
-// fails). Cross-reference: src/components/CodeEditor.probe.test.tsx verifies
-// the handle reads full docs under virtualization.
+// fails). The handle is stored by src/components/CodeEditor.tsx's
+// onCreateEditor (the cmEditorView expando on the .cm-editor element).
 const readSettingsJsonText = (): string => {
     const editor = screen.getByTestId('settings-json-editor');
     const cmEditor = editor.querySelector('.cm-editor') as unknown as
